@@ -8,20 +8,24 @@
         [(reserve) reserve]
         [(flower) flower]
         [(hints) hints]
-        ;[(type) 'game-state]
         [else (error 'game-state "invalid state query" query)]))))
 
 ;; deck
 (define numeric-offset 48)
 
+(define tableau-length 8)
+
 (define red-char #\R)
 (define red-sym #\+)
+(define red-hint 0)
 
 (define green-char #\G)
 (define green-sym #\-)
+(define green-hint 1)
 
 (define black-char #\B)
 (define black-sym #\*)
+(define black-hint 2)
 
 (define flower-char #\@)
 (define flower-sym #\space)
@@ -43,9 +47,39 @@
     (make-suit black-sym (make-ranks black-char))
     (list (make-card-string flower-sym flower-char))))
 
-(define (dragon? card)
-  (let ([card-char (string-ref card 1)])
-    (and (not (char-numeric? card-char)) (not (eq? card-char flower-char)))))
-
 (define (rank card)
-  (if (dragon? card) #f (- (char->integer (string-ref card 1)) numeric-offset)))
+  (let ([card-char (string-ref card 1)])
+    (and (char-numeric? card-char) (- (char->integer card-char) numeric-offset))))
+
+(define (flower? card) (eq? flower-char (string-ref card 1)))
+
+(define (dragon? card) (not (or (rank card) (flower? card))))
+
+;;new game generation
+(define max-seed (1- (expt 2 32)))
+
+(define (new-seed)
+  (let ([d (random 1)] [t (random 1)])
+    (let ([s (or (and (zero? d) (random (random-seed)))
+               (random (time-second (current-time))))])
+      (or (and (zero? t) s) (- (max-seed s))))))
+
+(define (list-rotate lst n)
+  (let loop ([c n] [l lst])
+    (if (zero? c) l (loop (1- c) (append (cdr l) (list (car l)))))))
+
+(define (deal)
+  (let loop ([dck deck] [tab (make-list tableau-length '())])
+    (if (null? dck)
+      (list-rotate tab (random tableau-length))
+      (let skip ([tab^ (list-rotate tab (random tableau-length))])
+        (if (>= (length (car tab^)) 5)
+          (skip (list-rotate tab^ 1))
+          (loop (cdr dck)
+            (cons (cons (car dck) (car tab^)) (cdr tab^))))))))
+
+(define (make-piles init) (make-list 3 init))
+
+(define (make-new-game)
+  (random-seed (new-seed))
+    (make-state (deal) (make-piles '()) (make-piles '()) #f (make-piles #f)))

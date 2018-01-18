@@ -256,6 +256,18 @@
 (define color-filled-place tb-white)
 (define color-place-key (logior tb-cyan tb-bold))
 
+(define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\i #\o #\p))
+(define tab-key-chars '(#\a #\s #\d #\f #\j #\k #\l #\;))
+
+(define res-cs '((3 2) (10 2) (17 2)))
+(define hin-cs '((24 2) (29 2) (34 2)))
+(define flo-cs '((45 2)))
+(define fou-cs '((58 2) (65 2) (72 2)))
+(define tab-cs '((6 6) (15 6) (24 6) (33 6) (42 6) (51 6) (60 6) (69 6)))
+(define key-cs
+  '((5 1) (12 1) (19 1) (25 1) (30 1) (35 1) (47 1) (60 1) (67 1) (74 1)
+    (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
+
 (define (card-color card)
   (case (suit card)
     [(red) color-card-red]
@@ -263,6 +275,12 @@
     [(black) color-card-black]
     [(flower) color-card-flower]
     [else (error 'card-color "invalid card" card)]))
+
+(define (add-offsets cs xo yo)
+  (map (lambda (c) (list (+ xo (car c)) (+ yo (cadr c)))) cs))
+
+(define (cons-attr-add-offset as cs xo yo)
+  (map (lambda (a c) (cons a c)) as (add-offsets cs xo yo)))
 
 (define (display-string str fg bg x0 y)
   (map
@@ -291,29 +309,15 @@
 (define (display-empty-place color x y)
   (display-string "[   ]" color color-bg x y))
 
+(define (display-filled-place card x y)
+  (display-empty-place color-filled-place x y)
+  (display-card card (+1 x) y))
+
 (define (display-empty-hint color x y)
   (display-string "( )" color color-bg x y))
 
 (define (display-place-char c x y)
   (tb-change-cell x y (char->integer c) color-place-key color-bg))
-
-(define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\i #\o #\p))
-(define tab-key-chars '(#\a #\s #\d #\f #\j #\k #\l #\;))
-
-(define res-cs '((3 2) (10 2) (17 2)))
-(define hin-cs '((24 2) (29 2) (34 2)))
-(define flo-cs '((45 2)))
-(define fou-cs '((58 2) (65 2) (72 2)))
-(define tab-cs '((6 6) (15 6) (24 6) (33 6) (42 6) (51 6) (60 6) (69 6)))
-(define key-cs
-  '((5 1) (12 1) (19 1) (25 1) (30 1) (35 1) (47 1) (60 1) (67 1) (74 1)
-    (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
-
-(define (add-offsets cs xo yo)
-  (map (lambda (c) (list (+ xo (car c)) (+ yo (cadr c)))) cs))
-
-(define (cons-attr-add-offset as cs xo yo)
-  (map (lambda (a c) (cons a c)) as (add-offsets cs xo yo)))
 
 (define (display-key-chars x-offset y-offset)
   (define as (append place-key-chars tab-key-chars))
@@ -334,15 +338,33 @@
 (define (display-card card x y)
   (display-string card (card-color card) color-bg x y))
 
-;(define (display-game-state state x-offset y-offset)
+(define (display-res res x-offset y-offset)
+  (define (null-or-card lst) (if (null? lst) #f (car lst)))
+  (map
+    (lambda (l)
+      (let ([elt (car l)] [x (cadr l)] [y (caddr l)])
+        (if elt
+          (display-filled-place elt x y)
+          (display-empty-place color-empty-place x y))))
+    (map (lambda (a d) (cons a d))
+      (map null-or-card res)
+      (add-offsets res-cs x-offset y-offset))))
 
+(define (display-game-state state x-offset y-offset)
+  (let ([res (state 'reserve)]
+         [hin (state 'hints)]
+         [flo (state 'flower)]
+         [fou (state 'foundation)]
+         [tab (state 'tableau)])
+    (display-res res x-offset y-offset)))
 
 (define (display-game-area x-offset y-offset)
-  (map
-    (lambda (f) (f x-offset y-offset))
-    (list display-border display-empty-places display-empty-hints display-key-chars))
-    (display-card "+R+" 4 2)
-  (tb-present))
+  (let ([ng (make-new-game)])
+    (map
+      (lambda (f) (f x-offset y-offset))
+      (list display-border display-key-chars))
+    (display-game-state ng x-offset y-offset)
+    (tb-present)))
 
 (define key-esc 27)
 

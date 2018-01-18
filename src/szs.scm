@@ -276,6 +276,10 @@
 (define key-cs
   '((5 1) (12 1) (19 1) (25 1) (30 1) (35 1) (47 1) (60 1) (67 1) (74 1)
     (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
+(define first-tableau-line 6)
+(define max-tableau-height 13)
+(define tableau-display-width 68) ; TODO: almost name collision
+(define tableau-left 6)
 
 (define (card-color card)
   (case (suit card)
@@ -378,7 +382,15 @@
           (display-filled-place (car p) x y)
           (loop (1+ n) (1+ y) (cdr p)))))))
 
+(define (display-clear-tableau)
+  (define clear-str (make-string tableau-display-width #\space))
+  (let ([end (+ first-tableau-line max-tableau-height)])
+    (let loop ([y first-tableau-line])
+      (when (< y end)
+        (display-string clear-str color-bg color-bg tableau-left y)))))
+
 (define (display-tab tab)
+  (display-clear-tableau)
   (map display-pile tab (add-offsets tab-cs)))
 
 (define (display-game-state state)
@@ -430,7 +442,8 @@
       (error 'resize "game area to small" `(,w ,h))
       (begin
         (x-offset (- (quotient w 2) (quotient game-width 2)))
-        (y-offset (- (quotient h 2) (quotient game-height 2)))))))
+        (y-offset (- (quotient h 2) (quotient game-height 2)))
+        (display-static-elements)))))
 
 (define (start-game)
   (let ([ev (make-ftype-pointer tb-event (foreign-alloc (ftype-sizeof tb-event)))])
@@ -444,6 +457,5 @@
         (raise ex))
       (lambda ()
         (resize)
-        (display-static-elements)
         (main-event-loop ev (make-new-game))))
     (cleanup)))

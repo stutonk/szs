@@ -284,35 +284,41 @@
 (define (display-place-char c x y)
   (tb-change-cell x y (char->integer c) color-place-key color-bg))
 
-(define place-key-chars '(#\q #\w #\e #\r #\t #\y #\u #\i #\o))
+(define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\u #\i #\o))
 (define tab-key-chars '(#\a #\s #\d #\f #\j #\k #\l #\;))
 
+(define (add-offsets cs xo yo)
+  (map (lambda (c) (list (+ xo (car c)) (+ yo (cadr c)))) cs))
+
+(define (cons-attr-add-offset as cs xo yo)
+  (map (lambda (a c) (cons a c)) as (add-offsets cs xo yo)))
+
+(define (display-key-chars x-offset y-offset)
+  (define as (append place-key-chars tab-key-chars))
+  (define cs
+    '((5 1) (12 1) (19 1) (25 1) (30 1) (35 1) (47 1) (60 1) (67 1) (74 1)
+      (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
+  (define (dpc c) (display-place-char (car c) (cadr c) (caddr c)))
+  (map dpc (cons-attr-add-offset as cs x-offset y-offset)))
+
 (define (display-hints x-offset y-offset)
-  (define hs
-    `((,color-card-red 24 2) (,color-card-green 29 2) (,color-card-black 34 2)))
-  (define (deh c)
-    (display-empty-hint (car c) (cadr c) (caddr c)))
-  (map deh
-    (map
-     (lambda (c)
-       (list (car c) (+ x-offset (cadr c)) (+ y-offset (caddr c))))
-      hs)))
+  (define as (list color-card-red color-card-green color-card-black))
+  (define cs '((24 2) (29 2) (34 2)))
+  (define (deh c) (display-empty-hint (car c) (cadr c) (caddr c)))
+  (map deh (cons-attr-add-offset as cs x-offset y-offset)))
 
 (define (display-places x-offset y-offset)
-  (define ps
+  (define cs
     '((3 2) (10 2) (17 2) (45 2) (58 2) (65 2) (72 2)
       (6 6) (15 6) (24 6) (33 6) (42 6) (51 6) (60 6) (69 6)))
   (define (dep c) (display-empty-place (car c) (cadr c)))
-  (map dep
-    (map
-      (lambda (c)
-        (list (+ x-offset (car c)) (+ y-offset (cadr c))))
-      ps)))
+  (map dep (add-offsets cs x-offset y-offset)))
 
 (define (display-game-area x-offset y-offset)
   (display-border x-offset y-offset)
   (display-places x-offset y-offset)
   (display-hints x-offset y-offset)
+  (display-key-chars x-offset y-offset)
   (tb-present))
 
 (define key-esc 27)

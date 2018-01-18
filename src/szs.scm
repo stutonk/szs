@@ -61,10 +61,11 @@
 
 (define flower-char #\@)
 (define flower-sym #\space)
-(define flower (list (make-card-string flower-sym flower-char)))
 
 ;; symbol, character -> string
 (define (make-card-string sym char) (string sym char sym))
+
+(define flower (list (make-card-string flower-sym flower-char)))
 
 ;; character -> list(character)
 (define (make-ranks schar)
@@ -390,15 +391,15 @@
     (display-hints hin)
     (display-flower flo)
     (display-res/fou fou fou-cs)
-    (display-tab tab)))
-
-(define (display-game-area)
-  (let ([ng (make-new-game)])
-    (display-border)
-    (display-place-keys)
-    (display-game-state ng)
+    (display-tab tab)
     (tb-present)))
 
+(define (display-static-elements)
+  (display-border)
+  (display-place-keys)
+  (tb-present))
+
+;; controller
 (define (lookup-key evptr)
   (let ([key (ftype-ref tb-event (key) evptr)]
          [ch (ftype-ref tb-event (ch) evptr)])
@@ -406,21 +407,22 @@
       [(eq? key-esc key) 'quit]
       [else (string->symbol (number->string ch))])))
 
-(define (execute-action continue action)
+(define (execute-action action)
   (case action
     [(quit) (raise (make-message-condition "Quit game"))]
     [(resize) (resize)]
-    [else (continue)]))
+    [else #f]))
 
-(define (main-event-loop evptr)
-  (let loop ()
+(define (main-event-loop evptr s0)
+  (let loop ([states (list s0)])
+    (display-game-state (car states))
     (let ([ev-type (tb-poll-event evptr)])
       (execute-action
-        loop
         (cond
           [(= tb-event-key ev-type) (lookup-key evptr)]
           [(= tb-event-resize ev-type) 'resize]
-          [else (loop)])))))
+          [else 'nop])))
+    (loop states)))
 
 (define (resize)
   (let ([w (tb-width)] [h (tb-height)])
@@ -442,6 +444,6 @@
         (raise ex))
       (lambda ()
         (resize)
-        (display-game-area)
-        (main-event-loop ev)))
+        (display-static-elements)
+        (main-event-loop ev (make-new-game))))
     (cleanup)))

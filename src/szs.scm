@@ -242,8 +242,10 @@
 (define (won? state) (every (lambda (x) x) (map null? (state 'tableau))))
 
 ;; view
-(define play-area-width 80)
-(define play-area-height 23)
+(define game-width 80)
+(define game-height 24)
+(define x-offset (make-parameter 0))
+(define y-offset (make-parameter 0))
 
 (define color-bg tb-default)
 (define color-border (logior tb-white tb-bold))
@@ -276,11 +278,13 @@
     [(flower) color-card-flower]
     [else (error 'card-color "invalid card" card)]))
 
-(define (add-offsets cs xo yo)
-  (map (lambda (c) (list (+ xo (car c)) (+ yo (cadr c)))) cs))
+(define (add-offsets cs)
+  (map (lambda (c) (list (+ (x-offset) (car c)) (+ (y-offset) (cadr c)))) cs))
 
-(define (cons-attr-add-offset as cs xo yo)
-  (map (lambda (a c) (cons a c)) as (add-offsets cs xo yo)))
+(define (cons-attr-add-offset as cs)
+  (map (lambda (a c) (cons a c)) as (add-offsets cs)))
+
+(define (null-or-card-list lst) (if (null? lst) #f (car lst)))
 
 (define (display-string str fg bg x0 y)
   (map
@@ -288,14 +292,14 @@
     (string->list str)
     (map (lambda (n) (+ n x0)) (iota (string-length str)))))
 
-(define (display-border x-offset y-offset)
-  (define top y-offset)
-  (define bottom (+ y-offset play-area-height -1))
-  (define left x-offset)
-  (define right (+ x-offset play-area-width -1))
+(define (display-border)
+  (define top (y-offset))
+  (define bottom (+ (y-offset) game-height -2))
+  (define left (x-offset))
+  (define right (+ (x-offset) game-width -1))
   (define (display-bar lc rc x y)
     (display-string
-      (list->string (append `(,lc) (make-list (+ play-area-width -2) #\─) `(,rc)))
+      (list->string (append `(,lc) (make-list (+ game-width -2) #\─) `(,rc)))
       color-border color-bg
       x y))
   (display-bar #\┌ #\┐ left top)
@@ -319,27 +323,26 @@
 (define (display-place-char c x y)
   (tb-change-cell x y (char->integer c) color-place-key color-bg))
 
-(define (display-key-chars x-offset y-offset)
+(define (display-key-chars)
   (define as (append place-key-chars tab-key-chars))
   (define (dpc c) (display-place-char (car c) (cadr c) (caddr c)))
-  (map dpc (cons-attr-add-offset as key-cs x-offset y-offset)))
+  (map dpc (cons-attr-add-offset as key-cs)))
 
-(define (display-empty-hints x-offset y-offset)
+(define (display-empty-hints)
   (define as (list color-card-red color-card-green color-card-black))
   (define (deh c) (display-empty-hint (car c) (cadr c) (caddr c)))
-  (map deh (cons-attr-add-offset as hin-cs x-offset y-offset)))
+  (map deh (cons-attr-add-offset as hin-cs)))
 
-(define (display-empty-places x-offset y-offset)
+(define (display-empty-places)
   (define cs (append res-cs flo-cs fou-cs tab-cs))
   (define as (make-list (length cs) color-empty-place))
   (define (dep c) (display-empty-place (car c) (cadr c) (caddr c)))
-  (map dep (cons-attr-add-offset as cs x-offset y-offset)))
+  (map dep (cons-attr-add-offset as cs)))
 
 (define (display-card card x y)
   (display-string card (card-color card) color-bg x y))
 
-(define (display-res res x-offset y-offset)
-  (define (null-or-card lst) (if (null? lst) #f (car lst)))
+(define (display-res res)
   (map
     (lambda (l)
       (let ([elt (car l)] [x (cadr l)] [y (caddr l)])
@@ -347,23 +350,24 @@
           (display-filled-place elt x y)
           (display-empty-place color-empty-place x y))))
     (map (lambda (a d) (cons a d))
-      (map null-or-card res)
-      (add-offsets res-cs x-offset y-offset))))
+      (map null-or-card-list res)
+      (add-offsets res-cs))))
 
-(define (display-game-state state x-offset y-offset)
+;(define (display-hints hin x-offset y-o))
+
+(define (display-game-state state)
   (let ([res (state 'reserve)]
          [hin (state 'hints)]
          [flo (state 'flower)]
          [fou (state 'foundation)]
          [tab (state 'tableau)])
-    (display-res res x-offset y-offset)))
+    (display-res res)))
 
-(define (display-game-area x-offset y-offset)
+(define (display-game-area)
   (let ([ng (make-new-game)])
-    (map
-      (lambda (f) (f x-offset y-offset))
-      (list display-border display-key-chars))
-    (display-game-state ng x-offset y-offset)
+    (display-border)
+    (display-key-chars)
+    (display-game-state ng)
     (tb-present)))
 
 (define key-esc 27)
@@ -378,6 +382,7 @@
 (define (execute-action continue action)
   (case action
     [(quit) (raise (make-message-condition "Quit game"))]
+    [(resize) (resize)]
     [else (continue)]))
 
 (define (main-event-loop evptr)
@@ -390,6 +395,14 @@
           [(= tb-event-resize ev-type) 'resize]
           [else (loop)])))))
 
+(define (resize)
+  (let ([w (tb-width)] [h (tb-height)])
+    (if (or (< w game-width) (< h game-height))
+      (error 'resize "game area to small" `(,w ,h))
+      (begin
+        (x-offset (- (quotient w 2) (quotient game-width 2)))
+        (y-offset (- (quotient h 2) (quotient game-height 2)))))))
+
 (define (start-game)
   (let ([ev (make-ftype-pointer tb-event (foreign-alloc (ftype-sizeof tb-event)))])
     (define (cleanup)
@@ -401,6 +414,7 @@
         (cleanup)
         (raise ex))
       (lambda ()
-        (display-game-area 0 0)
+        (resize)
+        (display-game-area)
         (main-event-loop ev)))
     (cleanup)))

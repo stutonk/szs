@@ -61,6 +61,7 @@
 
 (define flower-char #\@)
 (define flower-sym #\space)
+(define flower (list (make-card-string flower-sym flower-char)))
 
 ;; symbol, character -> string
 (define (make-card-string sym char) (string sym char sym))
@@ -80,7 +81,7 @@
     (make-suit red-sym (make-ranks red-char))
     (make-suit green-sym (make-ranks green-char))
     (make-suit black-sym (make-ranks black-char))
-    (list (make-card-string flower-sym flower-char))))
+    flower))
 
 ;; string -> number
 (define (rank card)
@@ -257,9 +258,14 @@
 (define color-empty-place (logior tb-black tb-bold))
 (define color-filled-place tb-white)
 (define color-place-key (logior tb-cyan tb-bold))
+(define color-filled-hint tb-yellow)
 
+(define key-esc 27)
 (define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\i #\o #\p))
 (define tab-key-chars '(#\a #\s #\d #\f #\j #\k #\l #\;))
+(define empty-place "[   ]")
+(define empty-hint "( )")
+(define filled-hint-char #\!)
 
 (define res-cs '((3 2) (10 2) (17 2)))
 (define hin-cs '((24 2) (29 2) (34 2)))
@@ -311,38 +317,28 @@
       (loop (1+ y)))))
 
 (define (display-empty-place color x y)
-  (display-string "[   ]" color color-bg x y))
-
-(define (display-filled-place card x y)
-  (display-empty-place color-filled-place x y)
-  (display-card card (+1 x) y))
-
-(define (display-empty-hint color x y)
-  (display-string "( )" color color-bg x y))
-
-(define (display-place-char c x y)
-  (tb-change-cell x y (char->integer c) color-place-key color-bg))
-
-(define (display-key-chars)
-  (define as (append place-key-chars tab-key-chars))
-  (define (dpc c) (display-place-char (car c) (cadr c) (caddr c)))
-  (map dpc (cons-attr-add-offset as key-cs)))
-
-(define (display-empty-hints)
-  (define as (list color-card-red color-card-green color-card-black))
-  (define (deh c) (display-empty-hint (car c) (cadr c) (caddr c)))
-  (map deh (cons-attr-add-offset as hin-cs)))
-
-(define (display-empty-places)
-  (define cs (append res-cs flo-cs fou-cs tab-cs))
-  (define as (make-list (length cs) color-empty-place))
-  (define (dep c) (display-empty-place (car c) (cadr c) (caddr c)))
-  (map dep (cons-attr-add-offset as cs)))
+  (display-string empty-place color color-bg x y))
 
 (define (display-card card x y)
   (display-string card (card-color card) color-bg x y))
 
-(define (display-res res)
+(define (display-filled-place card x y)
+  (display-empty-place color-filled-place x y)
+  (display-card card (1+ x) y))
+
+(define (display-hint color fill? x y)
+  (display-string empty-hint color color-bg x y)
+  (when fill? (tb-change-cell (1+ x) y filled-hint-char color-filled-hint color-bg)))
+
+(define (display-place-key c x y)
+  (tb-change-cell x y (char->integer c) color-place-key color-bg))
+
+(define (display-place-keys)
+  (define as (append place-key-chars tab-key-chars))
+  (define (dpc c) (display-place-key (car c) (cadr c) (caddr c)))
+  (map dpc (cons-attr-add-offset as key-cs)))
+
+(define (display-res/fou r/f cs)
   (map
     (lambda (l)
       (let ([elt (car l)] [x (cadr l)] [y (caddr l)])
@@ -350,10 +346,39 @@
           (display-filled-place elt x y)
           (display-empty-place color-empty-place x y))))
     (map (lambda (a d) (cons a d))
-      (map null-or-card-list res)
-      (add-offsets res-cs))))
+      (map null-or-card-list r/f)
+      (add-offsets cs))))
 
-;(define (display-hints hin x-offset y-o))
+(define (display-hints hin)
+  (let ([cs (add-offsets hin-cs)])
+    (map (lambda (elt)
+           (let ([c (car elt)]
+                  [f (cadr elt)]
+                  [x (caddr elt)]
+                  [y (cadddr elt)])
+           (display-hint c f x y)))
+      (list
+        (append `(,color-card-red ,(car hin)) (car cs))
+        (append `(,color-card-green ,(cadr hin)) (cadr cs))
+        (append `(,color-card-black ,(caddr hin)) (caddr cs))))))
+
+(define (display-flower flo)
+  (let* ([cs (add-offsets flo-cs)] [x (caar cs)] [y (cadar cs)])
+    (if flo
+      (display-filled-place flower x y)
+      (display-empty-place color-empty-place x y))))
+
+(define (display-pile pile c)
+  (let ([x (car c)] [y0 (cadr c)] [l (length pile)])
+    (if (null? pile)
+      (display-empty-place color-empty-place x y0)
+      (let loop ([n 0] [y y0] [p pile])
+        (when (< n l)
+          (display-filled-place (car p) x y)
+          (loop (1+ n) (1+ y) (cdr p)))))))
+
+(define (display-tab tab)
+  (map display-pile tab (add-offsets tab-cs)))
 
 (define (display-game-state state)
   (let ([res (state 'reserve)]
@@ -361,16 +386,18 @@
          [flo (state 'flower)]
          [fou (state 'foundation)]
          [tab (state 'tableau)])
-    (display-res res)))
+    (display-res/fou res res-cs)
+    (display-hints hin)
+    (display-flower flo)
+    (display-res/fou fou fou-cs)
+    (display-tab tab)))
 
 (define (display-game-area)
   (let ([ng (make-new-game)])
     (display-border)
-    (display-key-chars)
+    (display-place-keys)
     (display-game-state ng)
     (tb-present)))
-
-(define key-esc 27)
 
 (define (lookup-key evptr)
   (let ([key (ftype-ref tb-event (key) evptr)]

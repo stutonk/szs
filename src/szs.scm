@@ -1,3 +1,4 @@
+(import (scheme) (termbox-chez-ffi))
 ;; utility functions
 ;; :: list(a), number -> list(a)
 (define (list-rotate lst n)
@@ -17,6 +18,10 @@
     (if (zero? n)
       xs
       (loop (1- n) (cdr xs)))))
+
+;; :: (a -> boolean), list(a) -> boolean
+(define (every pred lst)
+  (if (null? lst) #t (and (pred (car lst)) (every pred (cdr lst)))))
 
 ;; game layout
 (define tableau-width 8)
@@ -161,8 +166,8 @@
     (or
       (null? (list-ref tab dst))
       (let ([src-bottom (list-ref (list-ref tab src) depth)]
-             [dst-top (car (list-ref tab dst))])
-        (not (eq? (suit src-bottom) (suit dst-top)))))))
+             [dst-t (car (list-ref tab dst))])
+        (not (eq? (suit src-bottom) (suit dst-t)))))))
 
 ;; :: closure(game-state), closure(move) -> boolean
 (define (valid-reserve-move? state move)
@@ -192,7 +197,7 @@
       [(eq? dst-area 'foundation) (valid-foundation-move? state move)]
       [else #f])))
 
-;; :: list(list(string)), number, number, number -> list(list(string))
+;; :: list(list(string)), number, number, number -> list(string), list(list(string))
 (define (take-cards place width pile n)
   (let* ([src (list-ref place pile)]
           [taken (take src n)]
@@ -231,5 +236,120 @@
             (make-state (car areas^) (cadr areas^) (caddr areas^) #f (state 'hints))))))))
 
 ;; :: closure(game-state) -> boolean
-(define (won? state)
+(define (won? state) (every (lambda (x) x) (map null? (state 'tableau))))
 
+;; view
+(define play-area-width 80)
+(define play-area-height 23)
+
+;; colors
+(define color-bg tb-default)
+(define color-border (logior tb-white tb-bold))
+(define color-card-red (logior tb-red tb-bold))
+(define color-card-green tb-green)
+(define color-card-black tb-magenta)
+(define color-card-flower tb-red)
+(define color-card-border (logior tb-white tb-bold))
+(define color-empty-place tb-cyan)
+(define color-place-key (logior tb-cyan tb-bold))
+
+(define (display-border x-offset y-offset)
+  (define top y-offset)
+  (define bottom (+ y-offset play-area-height -1))
+  (define left x-offset)
+  (define right (+ x-offset play-area-width -1))
+  (tb-change-cell left top (char->integer #\┌) color-border color-bg)
+  (tb-change-cell right top (char->integer #\┐) color-border color-bg)
+  (tb-change-cell left bottom (char->integer #\└) color-border color-bg)
+  (tb-change-cell right bottom (char->integer #\┘) color-border color-bg)
+  (let loop ([y (1+ top)])
+    (when (< y bottom)
+      (tb-change-cell left y (char->integer #\│) color-border color-bg)
+      (tb-change-cell right y (char->integer #\│) color-border color-bg)
+      (loop (1+ y))))
+  (let loop ([x (1+ left)])
+    (when (< x right)
+      (tb-change-cell x top (char->integer #\─) color-border color-bg)
+      (tb-change-cell x bottom (char->integer #\─) color-border color-bg)
+      (loop (1+ x)))))
+
+(define (display-empty-place x y)
+  (tb-change-cell x y (char->integer #\[) color-empty-place color-bg)
+  (tb-change-cell (+ 4 x) y (char->integer #\]) color-empty-place color-bg))
+
+(define (display-empty-hint color x y)
+  (tb-change-cell x y (char->integer #\() color color-bg)
+  (tb-change-cell (+ 2 x) y (char->integer #\)) color color-bg))
+
+(define (display-place-char c x y)
+  (tb-change-cell x y (char->integer c) color-place-key color-bg))
+
+(define place-key-chars '(#\q #\w #\e #\r #\t #\y #\u #\i #\o))
+(define tab-key-chars '(#\a #\s #\d #\f #\j #\k #\l #\;))
+
+(define (display-hints x-offset y-offset)
+  (define hs
+    `((,color-card-red 24 2) (,color-card-green 29 2) (,color-card-black 34 2)))
+  (define (deh c)
+    (display-empty-hint (car c) (cadr c) (caddr c)))
+  (map deh
+    (map
+     (lambda (c)
+       (list (car c) (+ x-offset (cadr c)) (+ y-offset (caddr c))))
+      hs)))
+
+(define (display-places x-offset y-offset)
+  (define ps
+    '((3 2) (10 2) (17 2) (45 2) (58 2) (65 2) (72 2)
+      (6 6) (15 6) (24 6) (33 6) (42 6) (51 6) (60 6) (69 6)))
+  (define (dep c) (display-empty-place (car c) (cadr c)))
+  (map dep
+    (map
+      (lambda (c)
+        (list (+ x-offset (car c)) (+ y-offset (cadr c))))
+      ps)))
+
+(define (display-game-area x-offset y-offset)
+  (display-border x-offset y-offset)
+  (display-places x-offset y-offset)
+  (display-hints x-offset y-offset)
+  (tb-present))
+
+(define key-esc 27)
+
+(define (lookup-key evptr)
+  (let ([key (ftype-ref tb-event (key) evptr)]
+         [ch (ftype-ref tb-event (ch) evptr)])
+    (cond
+      [(eq? key-esc key) 'quit]
+      [else (string->symbol (number->string ch))])))
+
+(define (execute-action continue action)
+  (case action
+    [(quit) (raise (make-message-condition "Quit game"))]
+    [else (continue)]))
+
+(define (main-event-loop evptr)
+  (let loop ()
+    (let ([ev-type (tb-poll-event evptr)])
+      (execute-action
+        loop
+        (cond
+          [(= tb-event-key ev-type) (lookup-key evptr)]
+          [(= tb-event-resize ev-type) 'resize]
+          [else (loop)])))))
+
+(define (start-game)
+  (let ([ev (make-ftype-pointer tb-event (foreign-alloc (ftype-sizeof tb-event)))])
+    (define (cleanup)
+      (tb-shutdown)
+      (foreign-free (ftype-pointer-address ev)))
+    (tb-init)
+    (with-exception-handler
+      (lambda (ex)
+        (cleanup)
+        (raise ex))
+      (lambda ()
+        (display-game-area 0 0)
+        (main-event-loop ev)))
+    (cleanup)))

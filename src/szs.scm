@@ -256,6 +256,8 @@
 (define color-filled-hint tb-yellow)
 (define color-warn-fg tb-black)
 (define color-warn-bg tb-yellow)
+(define color-inform-fg tb-white)
+(define color-inform-bg tb-blue)
 
 (define key-esc 27)
 (define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\i #\o #\p))
@@ -416,7 +418,7 @@
     (tb-present)))
 
 (define (clear-message) (display-message "" tb-default tb-default))
-
+(define (inform msg) (display-message msg color-inform-fg color-inform-bg))
 (define (warn msg) (display-message msg color-warn-fg color-warn-bg))
 
 ;; controller
@@ -448,7 +450,25 @@
     (values from to)
     (values (cdr from) (cons (car from) to))))
 
-(define (ask-warn msg evptr)
+(define (undo us rs)
+  (if (or (null? us) (null? (cdr us)))
+    (begin
+      (inform "Nothing to undo.")
+      (values us rs))
+    (begin
+      (inform (format #f "Move ~a undone." (1- (length us))))
+      (values (cdr us) (cons (car us) rs)))))
+
+(define (redo us rs)
+  (if (null? rs)
+    (begin
+      (inform "Nothing to redo.")
+      (values us rs))
+    (begin
+      (inform (format #f "Move ~a redone." (length us)))
+      (values (cons (car rs) us) (cdr rs)))))
+
+(define (warn-ask msg evptr)
   (warn msg)
   (let ([ev (get-next-event evptr)])
     (clear-message)
@@ -459,11 +479,11 @@
     (display-game-state (car us))
     (let ([ev (get-next-event evptr)])
       (case (lookup-keybind ev)
-        [(undo) (let-values ([(us^ rs^) (maybe-move-car us rs)]) (loop us^ rs^))]
-        [(redo) (let-values ([(rs^ us^) (maybe-move-car rs us)]) (loop us^ rs^))]
-        [(new) (when (ask-warn "Start a new game? (Y/N)" evptr)
+        [(undo) (let-values ([(us^ rs^) (undo us rs)]) (loop us^ rs^))]
+        [(redo) (let-values ([(us^ rs^) (redo us rs)]) (loop us^ rs^))]
+        [(new) (when (warn-ask "Start a new game? (Y/N)" evptr)
                  (loop (list (make-new-game)) '()))]
-        [(quit) (when (ask-warn "Quit game? (Y/N)" evptr)
+        [(quit) (when (warn-ask "Quit game? (Y/N)" evptr)
                   (raise (make-message-condition "quit game")))]
         [(select) (let ([state^ (select/move evptr)])
                     (when sel (loop (cons state^ us) '())))]))

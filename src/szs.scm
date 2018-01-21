@@ -1,4 +1,4 @@
-(import (scheme) (termbox-chez-ffi))
+(import (scheme) (termbox.chezscheme))
 ;; utility functions
 
 ;; list(a), number -> list(a)

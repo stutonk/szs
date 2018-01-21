@@ -258,6 +258,8 @@
 (define color-warn-bg tb-yellow)
 (define color-inform-fg tb-white)
 (define color-inform-bg tb-blue)
+(define color-error-fg tb-white)
+(define color-error-bg tb-red)
 
 (define key-esc 27)
 (define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\i #\o #\p))
@@ -409,17 +411,27 @@
   (display-place-keys)
   (tb-present))
 
-(define (display-message msg fg bg)
+(define (display-msg msg fg bg)
   (let ([mlen (string-length msg)])
     (when (> mlen game-width)
-      (error 'display-message "message too long" msg))
+      (error 'display-msg "message too long" msg))
     (display-string msg fg bg 0 msg-area-y)
     (display-string (make-string (- game-width mlen) #\space) fg bg mlen msg-area-y)
     (tb-present)))
 
-(define (clear-message) (display-message "" tb-default tb-default))
-(define (inform msg) (display-message msg color-inform-fg color-inform-bg))
-(define (warn msg) (display-message msg color-warn-fg color-warn-bg))
+(define (clear-msg) (display-msg "" tb-default tb-default))
+
+(define (error-msg msg) (display-msg msg color-error-fg color-error-bg))
+
+(define (inform-msg msg) (display-msg msg color-inform-fg color-inform-bg))
+
+(define (warn-msg msg) (display-msg msg color-warn-fg color-warn-bg))
+
+(define (warn-ask msg evptr)
+  (warn-msg msg)
+  (let ([ev (get-next-event evptr)])
+    (clear-msg)
+    (eq? (ev 'char) #\y)))
 
 ;; controller
 (define (make-event type key char)
@@ -445,34 +457,23 @@
       [(eq? key key-esc) 'quit]
       [(memq char (append place-key-chars tab-key-chars)) 'select])))
 
-(define (maybe-move-car from to)
-  (if (or (null? from) (null? (cdr from)))
-    (values from to)
-    (values (cdr from) (cons (car from) to))))
-
 (define (undo us rs)
   (if (or (null? us) (null? (cdr us)))
     (begin
-      (inform "Nothing to undo.")
+      (inform-msg "Nothing to undo.")
       (values us rs))
     (begin
-      (inform (format #f "Move ~a undone." (1- (length us))))
+      (inform-msg (format #f "Move ~a undone." (1- (length us))))
       (values (cdr us) (cons (car us) rs)))))
 
 (define (redo us rs)
   (if (null? rs)
     (begin
-      (inform "Nothing to redo.")
+      (inform-msg "Nothing to redo.")
       (values us rs))
     (begin
-      (inform (format #f "Move ~a redone." (length us)))
+      (inform-msg (format #f "Move ~a redone." (length us)))
       (values (cons (car rs) us) (cdr rs)))))
-
-(define (warn-ask msg evptr)
-  (warn msg)
-  (let ([ev (get-next-event evptr)])
-    (clear-message)
-    (eq? (ev 'char) #\y)))
 
 (define (main-event-loop evptr s0)
   (let loop ([us (list s0)] [rs '()])
@@ -486,7 +487,8 @@
         [(quit) (when (warn-ask "Quit game? (Y/N)" evptr)
                   (raise (make-message-condition "quit game")))]
         [(select) (let ([state^ (select/move evptr)])
-                    (when sel (loop (cons state^ us) '())))]))
+                    (when sel (loop (cons state^ us) '())))]
+        [else (error-msg "Command not recognized.")]))
     (loop us rs)))
 
 (define (resize)

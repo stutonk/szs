@@ -1,5 +1,4 @@
 (import (scheme) (termbox.chezscheme))
-;; utility functions
 
 ;; list(a), number -> list(a)
 (define (list-rotate lst n)
@@ -24,9 +23,8 @@
 (define (every pred lst)
   (if (null? lst) #t (and (pred (car lst)) (every pred (cdr lst)))))
 
-;; game layout
-(define tableau-width 8)
-(define tableau-depth 5)
+(define tableau-num-piles 8)
+(define tabelau-pile-depth 5)
 
 (define reserve-width 3)
 
@@ -36,7 +34,7 @@
 ;; symbol -> number
 (define (place-width place)
   (case place
-    [(tableau) tableau-width]
+    [(tableau) tableau-num-piles]
     [(reserve) reserve-width]
     [(foundation) foundation-width]
     [else (error 'place-width "invalid place" place)]))
@@ -44,7 +42,6 @@
 (define src-areas '(tableau reserve))
 (define dst-areas '(tableau reserve foundation))
 
-;; deck parameters and operations
 (define numeric-offset 48)
 
 (define red-char #\R)
@@ -105,8 +102,6 @@
 ;; string -> boolean
 (define (dragon? card) (not (or (rank card) (flower? card))))
 
-;; game data structures
-
 ;; list(list(string)), list(list(string)), list(list(string)), boolean, list(boolean)
 ;;    -> closure(game-state)
 (define (make-state ts fs rs f hs)
@@ -144,11 +139,11 @@
 
 ;; -> list(list(string))
 (define (deal)
-  (let loop ([dck deck] [tab (make-list tableau-width '())])
+  (let loop ([dck deck] [tab (make-list tableau-num-piles '())])
     (if (null? dck)
-      (list-rotate tab (random tableau-width))
-      (let skip ([tab^ (list-rotate tab (random tableau-width))])
-        (if (>= (length (car tab^)) tableau-depth)
+      (list-rotate tab (random tableau-num-piles))
+      (let skip ([tab^ (list-rotate tab (random tableau-num-piles))])
+        (if (>= (length (car tab^)) tabelau-pile-depth)
           (skip (list-rotate tab^ 1))
           (loop (cdr dck)
             (cons (cons (car dck) (car tab^)) (cdr tab^))))))))
@@ -161,7 +156,6 @@
   (random-seed (new-seed))
     (make-state (deal) (make-piles '()) (make-piles '()) #f (make-piles #f)))
 
-;; game play operations
 ;; closure(game-state), closure(move) -> boolean
 (define (valid-tableau-move? state move)
   (let ([tab (state 'tableau)]
@@ -243,11 +237,11 @@
 ;; closure(game-state) -> boolean
 (define (won? state) (every (lambda (x) x) (map null? (state 'tableau))))
 
-;; view
 (define game-width 80)
 (define game-height 24)
 (define x-offset (make-parameter 0))
 (define y-offset (make-parameter 0))
+(define msg-area-y (1- game-height))
 
 (define color-bg tb-default)
 (define color-border (logior tb-white tb-bold))
@@ -260,6 +254,8 @@
 (define color-filled-place tb-white)
 (define color-place-key (logior tb-cyan tb-bold))
 (define color-filled-hint tb-yellow)
+(define color-warn-fg tb-black)
+(define color-warn-bg tb-yellow)
 
 (define key-esc 27)
 (define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\i #\o #\p))
@@ -278,7 +274,7 @@
     (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
 (define first-tableau-line 6)
 (define max-tableau-height 13)
-(define tableau-display-width 68) ; TODO: almost name collision
+(define tableau-char-width 68) ; TODO: almost name collision
 (define tableau-left 6)
 
 (define (card-color card)
@@ -383,7 +379,7 @@
           (loop (1+ n) (1+ y) (cdr p)))))))
 
 (define (display-clear-tableau)
-  (define clear-str (make-string tableau-display-width #\space))
+  (define clear-str (make-string tableau-char-width #\space))
   (let ([end (+ first-tableau-line max-tableau-height)])
     (let loop ([y first-tableau-line])
       (when (< y end)
@@ -411,30 +407,67 @@
   (display-place-keys)
   (tb-present))
 
-;; controller
-(define (lookup-key evptr)
-  (let ([key (ftype-ref tb-event (key) evptr)]
-         [ch (ftype-ref tb-event (ch) evptr)])
-    (cond
-      [(eq? key-esc key) 'quit]
-      [else (string->symbol (number->string ch))])))
+(define (display-message msg fg bg)
+  (let ([mlen (string-length msg)])
+    (when (> mlen game-width)
+      (error 'display-message "message too long" msg))
+    (display-string msg fg bg 0 msg-area-y)
+    (display-string (make-string (- game-width mlen) #\space) fg bg mlen msg-area-y)
+    (tb-present)))
 
-(define (execute-action action)
-  (case action
-    [(quit) (raise (make-message-condition "Quit game"))]
-    [(resize) (resize)]
-    [else #f]))
+(define (clear-message) (display-message "" tb-default tb-default))
+
+(define (warn msg) (display-message msg color-warn-fg color-warn-bg))
+
+;; controller
+(define (make-event type key char)
+  (let ([t type] [k key] [c char])
+    (lambda (query)
+      (case query
+        [(type) t]
+        [(key) k]
+        [(char) c]))))
+
+(define (get-next-event evptr)
+  (let ([ev-type (tb-poll-event evptr)])
+    (let ([key (ftype-ref tb-event (key) evptr)]
+           [char (integer->char (ftype-ref tb-event (ch) evptr))])
+      (make-event ev-type key char))))
+
+(define (lookup-keybind event)
+  (let ([key (event 'key)] [char (event 'char)])
+    (cond
+      [(eq? char #\u) 'undo]
+      [(eq? char #\z) 'redo]
+      [(eq? char #\n) 'new]
+      [(eq? key key-esc) 'quit]
+      [(memq char (append place-key-chars tab-key-chars)) 'select])))
+
+(define (maybe-move-car from to)
+  (if (or (null? from) (null? (cdr from)))
+    (values from to)
+    (values (cdr from) (cons (car from) to))))
+
+(define (ask-warn msg evptr)
+  (warn msg)
+  (let ([ev (get-next-event evptr)])
+    (clear-message)
+    (eq? (ev 'char) #\y)))
 
 (define (main-event-loop evptr s0)
-  (let loop ([states (list s0)])
-    (display-game-state (car states))
-    (let ([ev-type (tb-poll-event evptr)])
-      (execute-action
-        (cond
-          [(= tb-event-key ev-type) (lookup-key evptr)]
-          [(= tb-event-resize ev-type) 'resize]
-          [else 'nop])))
-    (loop states)))
+  (let loop ([us (list s0)] [rs '()])
+    (display-game-state (car us))
+    (let ([ev (get-next-event evptr)])
+      (case (lookup-keybind ev)
+        [(undo) (let-values ([(us^ rs^) (maybe-move-car us rs)]) (loop us^ rs^))]
+        [(redo) (let-values ([(rs^ us^) (maybe-move-car rs us)]) (loop us^ rs^))]
+        [(new) (when (ask-warn "Start a new game? (Y/N)" evptr)
+                 (loop (list (make-new-game)) '()))]
+        [(quit) (when (ask-warn "Quit game? (Y/N)" evptr)
+                  (raise (make-message-condition "quit game")))]
+        [(select) (let ([state^ (select/move evptr)])
+                    (when sel (loop (cons state^ us) '())))]))
+    (loop us rs)))
 
 (define (resize)
   (let ([w (tb-width)] [h (tb-height)])

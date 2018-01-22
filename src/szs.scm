@@ -1,5 +1,5 @@
 (import (scheme) (termbox.chezscheme))
-
+;;;; model
 ;; list(a), number -> list(a)
 (define (list-rotate lst n)
   (let loop ([c n] [l lst])
@@ -237,13 +237,18 @@
 ;; closure(game-state) -> boolean
 (define (won? state) (every (lambda (x) x) (map null? (state 'tableau))))
 
+;;;; view
 (define game-width 80)
 (define game-height 24)
 (define x-offset (make-parameter 0))
 (define y-offset (make-parameter 0))
 (define msg-area-y (1- game-height))
+(define first-tableau-line 6)
+(define max-tableau-height 13)
+(define tableau-char-width 68)
+(define tableau-left 6)
 
-(define color-bg tb-default)
+(define color-bg tb-black)
 (define color-border (logior tb-white tb-bold))
 (define color-card-red (logior tb-red tb-bold))
 (define color-card-green tb-green)
@@ -276,10 +281,12 @@
 (define key-cs
   '((5 1) (12 1) (19 1) (25 1) (30 1) (35 1) (47 1) (60 1) (67 1) (74 1)
     (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
-(define first-tableau-line 6)
-(define max-tableau-height 13)
-(define tableau-char-width 68) ; TODO: almost name collision
-(define tableau-left 6)
+
+(define (coords area)
+  (case area
+    [(tableau) tab-cs]
+    [(reserve) res-cs]
+    [(foundation-width) fou-cs]))
 
 (define (card-color card)
   (case (suit card)
@@ -324,12 +331,24 @@
 (define (display-empty-place color x y)
   (display-string empty-place color color-bg x y))
 
+(define (display-reverse-place color x y)
+  (display-string empty-place color-bg color x y))
+
 (define (display-card card x y)
   (display-string card (card-color card) color-bg x y))
+
+(define (display-reverse-card card x y)
+  (let ([color (card-color card)])
+    (display-string card color-bg
+     (if (eq? color color-card-red) color-card-flower color) x y))) ; suppress blink
 
 (define (display-filled-place card x y)
   (display-empty-place color-filled-place x y)
   (display-card card (1+ x) y))
+
+(define (display-highlighted card x y)
+  (display-reverse-place color-filled-place x y)
+  (display-reverse-card card (1+ x) y))
 
 (define (display-hint color fill? x y)
   (display-string empty-hint color color-bg x y)
@@ -411,6 +430,18 @@
   (display-place-keys)
   (tb-present))
 
+(define (highlight-cards state area pile depth)
+  (let* ([coord (list-ref (coords area) pile)]
+          [ps (list-ref (state area) pile)]
+          [offset (1- (length ps))])
+    ;(raise (make-message-condition (format #f "c: ~a; l: ~a" coord ps)))
+    (let ([x (car coord)] [y (+ offset (cadr coord))])
+      (let loop ([cards (take (reverse ps) depth)] [y^ y])
+        (when (not (null? cards))
+          (display-highlighted (car cards) x y^)
+          (loop (cdr cards) (1- y^))))))
+  (tb-present))
+
 (define (display-msg msg fg bg)
   (let ([mlen (string-length msg)])
     (when (> mlen game-width)
@@ -433,7 +464,16 @@
     (clear-msg)
     (eq? (ev 'char) #\y)))
 
-;; controller
+(define (resize)
+  (let ([w (tb-width)] [h (tb-height)])
+    (if (or (< w game-width) (< h game-height))
+      (error 'resize "game area to small" `(,w ,h))
+      (begin
+        (x-offset (- (quotient w 2) (quotient game-width 2)))
+        (y-offset (- (quotient h 2) (quotient game-height 2)))
+        (display-static-elements)))))
+
+;;;; controller
 (define (make-event type key char)
   (let ([t type] [k key] [c char])
     (lambda (query)
@@ -475,6 +515,9 @@
       (inform-msg (format #f "Move ~a redone." (length us)))
       (values (cons (car rs) us) (cdr rs)))))
 
+(define (select/move state evptr)
+  #f)
+
 (define (main-event-loop evptr s0)
   (let loop ([us (list s0)] [rs '()])
     (display-game-state (car us))
@@ -486,19 +529,10 @@
                  (loop (list (make-new-game)) '()))]
         [(quit) (when (warn-ask "Quit game? (Y/N)" evptr)
                   (raise (make-message-condition "quit game")))]
-        [(select) (let ([state^ (select/move evptr)])
+        [(select) (let ([state^ (select/move (car us) evptr)])
                     (when sel (loop (cons state^ us) '())))]
         [else (error-msg "Command not recognized.")]))
     (loop us rs)))
-
-(define (resize)
-  (let ([w (tb-width)] [h (tb-height)])
-    (if (or (< w game-width) (< h game-height))
-      (error 'resize "game area to small" `(,w ,h))
-      (begin
-        (x-offset (- (quotient w 2) (quotient game-width 2)))
-        (y-offset (- (quotient h 2) (quotient game-height 2)))
-        (display-static-elements)))))
 
 (define (start-game)
   (let ([ev (make-ftype-pointer tb-event (foreign-alloc (ftype-sizeof tb-event)))])

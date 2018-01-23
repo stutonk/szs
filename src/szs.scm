@@ -23,6 +23,13 @@
 (define (every pred lst)
   (if (null? lst) #t (and (pred (car lst)) (every pred (cdr lst)))))
 
+;; a, list(a) -> number
+(define (ffq elt lst)
+  (let ([mem? (memq elt lst)])
+    (if mem?
+      (- (length lst) (length mem?))
+      mem?)))
+
 (define tableau-num-piles 8)
 (define tabelau-pile-depth 5)
 
@@ -156,17 +163,20 @@
   (random-seed (new-seed))
     (make-state (deal) (make-piles '()) (make-piles '()) #f (make-piles #f)))
 
+(define (compatible-neighbors? src-bottom dst-top)
+  (and
+    (not (dragon? src-bottom))
+    (not (eq? (suit src-bottom) (suit dst-top)))
+    (= (1+ (rank src-bottom)) (rank dst-top))))
+
 ;; closure(game-state), closure(move) -> boolean
 (define (valid-tableau-move? state move)
-  (let ([tab (state 'tableau)]
-         [src (move 'src-pile)]
-         [depth (move 'ncards)]
-         [dst (move 'dst-pile)])
+  (let ([src (list-ref (state (move 'src-area)) (move 'src-pile))]
+         [ncards (move 'ncards)]
+         [dst (list-ref (state (move 'dst-area)) (move 'dst-pile))])
     (or
-      (null? (list-ref tab dst))
-      (let ([src-bottom (list-ref (list-ref tab src) depth)]
-             [dst-t (car (list-ref tab dst))])
-        (not (eq? (suit src-bottom) (suit dst-t)))))))
+      (null? dst)
+      (compatible-neighbors? (list-ref src (1- ncards)) (car dst)))))
 
 ;; closure(game-state), closure(move) -> boolean
 (define (valid-reserve-move? state move)
@@ -190,8 +200,7 @@
 (define (valid-move? state move)
   (let ([src-area (move 'src-area)] [dst-area (move 'dst-area)])
     (cond
-      [(and (eq? src-area 'tableau) (eq? dst-area 'tableau))
-       (valid-tableau-move? state move)]
+      [(eq? dst-area 'tableau) (valid-tableau-move? state move)]
       [(eq? dst-area 'reserve) (valid-reserve-move? state move)]
       [(eq? dst-area 'foundation) (valid-foundation-move? state move)]
       [else #f])))
@@ -200,7 +209,7 @@
 (define (take-cards place width pile n)
   (let* ([src (list-ref place pile)]
           [taken (take src n)]
-          [left (drop src n)])
+          [left (list-tail src n)])
     (let loop ([c width] [place^ '()])
       (let ([next (1- c)])
         (cond
@@ -218,21 +227,19 @@
         [else (loop next (cons (list-ref place next) place^))]))))
 
 ;; closure(game-state), closure(move) -> closure(game-state)
-(define (move state move)
-  (if (not (valid-move? state move))
-    (error 'move "invalid move")
-    (let ([sa (move 'src-area)]
-           [sp (move 'src-pile)]
-           [n (move 'ncards)]
-           [da (move 'dst-area)]
-           [dp (move 'dst-pile)])
-      (let-values ([(cards src^) (take-cards (state sa) (place-width sa) sp n)])
-        (let ([dst^ (give-cards (if (eq? sa da) src^ (state da)) (place-width da) dp cards)])
-          (let ([areas^ (map (lambda (x) (cond [(eq? da x) dst^]
-                                           [(eq? sa x) src^]
-                                           [else (state x)]))
-                          '(tableau foundation reserve))])
-            (make-state (car areas^) (cadr areas^) (caddr areas^) #f (state 'hints))))))))
+(define (do-move state move)
+  (let ([sa (move 'src-area)]
+          [sp (move 'src-pile)]
+          [n (move 'ncards)]
+          [da (move 'dst-area)]
+          [dp (move 'dst-pile)])
+    (let-values ([(cards src^) (take-cards (state sa) (place-width sa) sp n)])
+      (let ([dst^ (give-cards (if (eq? sa da) src^ (state da)) (place-width da) dp cards)])
+        (let ([areas^ (map (lambda (x) (cond [(eq? da x) dst^]
+                                          [(eq? sa x) src^]
+                                          [else (state x)]))
+                        '(tableau foundation reserve))])
+          (make-state (car areas^) (cadr areas^) (caddr areas^) #f (state 'hints)))))))
 
 ;; closure(game-state) -> boolean
 (define (won? state) (every (lambda (x) x) (map null? (state 'tableau))))
@@ -269,6 +276,7 @@
 (define key-esc 27)
 (define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\i #\o #\p))
 (define tab-key-chars '(#\a #\s #\d #\f #\j #\k #\l #\;))
+(define key-chars (append place-key-chars tab-key-chars))
 (define empty-place "[   ]")
 (define empty-hint "( )")
 (define filled-hint-char #\!)
@@ -281,6 +289,22 @@
 (define key-cs
   '((5 1) (12 1) (19 1) (25 1) (30 1) (35 1) (47 1) (60 1) (67 1) (74 1)
     (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
+
+(define (top-row-loc ch)
+  (let ([i (ffq ch place-key-chars)])
+    (case i
+      [(0 1 2) (list 'reserve i)]
+      [(7 8 9) (list 'foundation (- i 7))]
+      [else #f])))
+
+(define (tab-loc ch)
+  (list 'tableau (ffq ch tab-key-chars)))
+
+(define (char->location ch)
+  (cond
+    [(memq ch place-key-chars) (top-row-loc ch)]
+    [(memq ch tab-key-chars) (tab-loc ch)]
+    [else #f]))
 
 (define (coords area)
   (case area
@@ -401,16 +425,17 @@
           (display-filled-place (car p) x y)
           (loop (1+ n) (1+ y) (cdr p)))))))
 
-(define (display-clear-tableau)
+(define (display-clear-tab)
   (define clear-str (make-string tableau-char-width #\space))
   (let ([end (+ first-tableau-line max-tableau-height)])
     (let loop ([y first-tableau-line])
       (when (< y end)
-        (display-string clear-str color-bg color-bg tableau-left y)))))
+        (display-string clear-str color-bg color-bg tableau-left y)
+        (loop (1+ y))))))
 
 (define (display-tab tab)
-  (display-clear-tableau)
-  (map display-pile tab (add-offsets tab-cs)))
+  (display-clear-tab)
+  (map display-pile (map reverse tab) (add-offsets tab-cs)))
 
 (define (display-game-state state)
   (let ([res (state 'reserve)]
@@ -434,9 +459,8 @@
   (let* ([coord (list-ref (coords area) pile)]
           [ps (list-ref (state area) pile)]
           [offset (1- (length ps))])
-    ;(raise (make-message-condition (format #f "c: ~a; l: ~a" coord ps)))
     (let ([x (car coord)] [y (+ offset (cadr coord))])
-      (let loop ([cards (take (reverse ps) depth)] [y^ y])
+      (let loop ([cards (take ps depth)] [y^ y])
         (when (not (null? cards))
           (display-highlighted (car cards) x y^)
           (loop (cdr cards) (1- y^))))))
@@ -450,13 +474,13 @@
     (display-string (make-string (- game-width mlen) #\space) fg bg mlen msg-area-y)
     (tb-present)))
 
-(define (clear-msg) (display-msg "" tb-default tb-default))
+(define (clear-msg) (display-msg "" tb-default tb-default) #t)
 
-(define (error-msg msg) (display-msg msg color-error-fg color-error-bg))
+(define (error-msg msg) (display-msg msg color-error-fg color-error-bg) #f)
 
-(define (inform-msg msg) (display-msg msg color-inform-fg color-inform-bg))
+(define (inform-msg msg) (display-msg msg color-inform-fg color-inform-bg) #t)
 
-(define (warn-msg msg) (display-msg msg color-warn-fg color-warn-bg))
+(define (warn-msg msg) (display-msg msg color-warn-fg color-warn-bg) #t)
 
 (define (warn-ask msg evptr)
   (warn-msg msg)
@@ -474,6 +498,9 @@
         (display-static-elements)))))
 
 ;;;; controller
+(define (get-char evptr)
+  (integer->char (ftype-ref tb-event (ch) evptr)))
+
 (define (make-event type key char)
   (let ([t type] [k key] [c char])
     (lambda (query)
@@ -485,7 +512,7 @@
 (define (get-next-event evptr)
   (let ([ev-type (tb-poll-event evptr)])
     (let ([key (ftype-ref tb-event (key) evptr)]
-           [char (integer->char (ftype-ref tb-event (ch) evptr))])
+           [char (get-char evptr)])
       (make-event ev-type key char))))
 
 (define (lookup-keybind event)
@@ -500,7 +527,7 @@
 (define (undo us rs)
   (if (or (null? us) (null? (cdr us)))
     (begin
-      (inform-msg "Nothing to undo.")
+      (error-msg "Nothing to undo.")
       (values us rs))
     (begin
       (inform-msg (format #f "Move ~a undone." (1- (length us))))
@@ -509,19 +536,44 @@
 (define (redo us rs)
   (if (null? rs)
     (begin
-      (inform-msg "Nothing to redo.")
+      (error-msg "Nothing to redo.")
       (values us rs))
     (begin
       (inform-msg (format #f "Move ~a redone." (length us)))
       (values (cons (car rs) us) (cdr rs)))))
 
+(define (maybe-highlight? state area pile depth)
+  (let ([ps (list-ref (state area) pile)])
+    (if (>= depth (length ps))
+      #f
+      (let* ([cards (list-tail ps depth)]
+              [curr (car cards)]
+              [next (cadr cards)])
+        (if (compatible-neighbors? curr next)
+          (begin (highlight-cards state area pile (1+ depth)) #t)
+          #f)))))
+
 (define (select/move state evptr)
-  #f)
+  (let ([loc (char->location (get-char evptr))])
+    (if loc
+      (let ([sa (car loc)] [sp (cadr loc)])
+        (if (null? (list-ref (state sa) sp))
+          (error-msg "Location is empty.")
+          (begin
+            (highlight-cards state sa sp 1)
+            (let loop ([d 1])
+              (let ([loc^ (char->location ((get-next-event evptr) 'char))])
+                (cond
+                  [(not loc^) #f]
+                  [(equal? loc^ loc) (loop (if (maybe-highlight? state sa sp d) (1+ d) d))]
+                  [else (make-move sa sp d (car loc^) (cadr loc^))]))))))
+      #f)))
 
 (define (main-event-loop evptr s0)
   (let loop ([us (list s0)] [rs '()])
     (display-game-state (car us))
     (let ([ev (get-next-event evptr)])
+      (clear-msg)
       (case (lookup-keybind ev)
         [(undo) (let-values ([(us^ rs^) (undo us rs)]) (loop us^ rs^))]
         [(redo) (let-values ([(us^ rs^) (redo us rs)]) (loop us^ rs^))]
@@ -529,8 +581,11 @@
                  (loop (list (make-new-game)) '()))]
         [(quit) (when (warn-ask "Quit game? (Y/N)" evptr)
                   (raise (make-message-condition "quit game")))]
-        [(select) (let ([state^ (select/move (car us) evptr)])
-                    (when sel (loop (cons state^ us) '())))]
+        [(select) (let* ([st (car us)] [mv (select/move st evptr)])
+                    (when mv
+                      (if (not (valid-move? st mv))
+                        (error-msg "Invalid move.")
+                        (loop (cons (do-move st mv) us) '()))))]
         [else (error-msg "Command not recognized.")]))
     (loop us rs)))
 

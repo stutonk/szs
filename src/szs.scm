@@ -163,11 +163,11 @@
   (random-seed (new-seed))
     (make-state (deal) (make-piles '()) (make-piles '()) #f (make-piles #f)))
 
-(define (compatible-neighbors? src-bottom dst-top)
+(define (compatible-neighbors? bottom top)
   (and
-    (not (dragon? src-bottom))
-    (not (eq? (suit src-bottom) (suit dst-top)))
-    (= (1+ (rank src-bottom)) (rank dst-top))))
+    (not (dragon? bottom))
+    (not (eq? (suit bottom) (suit top)))
+    (= (1+ (rank bottom)) (rank top))))
 
 ;; closure(game-state), closure(move) -> boolean
 (define (valid-tableau-move? state move)
@@ -542,15 +542,15 @@
       (inform-msg (format #f "Move ~a redone." (length us)))
       (values (cons (car rs) us) (cdr rs)))))
 
-(define (maybe-highlight? state area pile depth)
+(define (maybe-highlight? state area pile ncards)
   (let ([ps (list-ref (state area) pile)])
-    (if (>= depth (length ps))
+    (if (>= ncards (length ps))
       #f
-      (let* ([cards (list-tail ps depth)]
+      (let* ([cards (list-tail ps (1- ncards))]
               [curr (car cards)]
               [next (cadr cards)])
         (if (compatible-neighbors? curr next)
-          (begin (highlight-cards state area pile (1+ depth)) #t)
+          (begin (highlight-cards state area pile (1+ ncards)) #t)
           #f)))))
 
 (define (select/move state evptr)
@@ -603,3 +603,6 @@
         (resize)
         (main-event-loop ev (make-new-game))))
     (cleanup)))
+
+;; TODO: The meaning of ncards in highlight is different from ncards in take/give and it's clashing
+;; TODO: Game shuffling is SHITE

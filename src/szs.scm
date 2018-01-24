@@ -12,13 +12,6 @@
       (reverse ys)
       (loop (1- n) (cdr xs) (cons (car xs) ys)))))
 
-;; list(a), number -> list(a)
-(define (drop lst n)
-  (let loop ([n n] [xs lst])
-    (if (zero? n)
-      xs
-      (loop (1- n) (cdr xs)))))
-
 ;; (a -> boolean), list(a) -> boolean
 (define (every pred lst)
   (if (null? lst) #t (and (pred (car lst)) (every pred (cdr lst)))))
@@ -46,93 +39,30 @@
     [(foundation) foundation-width]
     [else (error 'place-width "invalid place" place)]))
 
-(define src-areas '(tableau reserve))
-(define dst-areas '(tableau reserve foundation))
-
-(define numeric-offset 48)
-
-(define red-char #\R)
-(define red-sym #\+)
-(define red-hint 0)
-
-(define green-char #\G)
-(define green-sym #\-)
-(define green-hint 1)
-
-(define black-char #\B)
-(define black-sym #\*)
-(define black-hint 2)
-
-(define flower-char #\@)
-(define flower-sym #\space)
-
-;; symbol, character -> string
-(define (make-card-string sym char) (string sym char sym))
-
-(define flower (list (make-card-string flower-sym flower-char)))
-
-;; character -> list(character)
-(define (make-ranks schar)
-  (append
-    (map integer->char (map (lambda (x) (+ x (1+ numeric-offset))) (iota 9)))
-    (list schar schar schar schar)))
-
-;; symbol, list(character) -> list(string)
-(define (make-suit sym lst)
-  (map (lambda (x) (make-card-string sym x)) lst))
-
 (define deck
-  (append
-    (make-suit red-sym (make-ranks red-char))
-    (make-suit green-sym (make-ranks green-char))
-    (make-suit black-sym (make-ranks black-char))
-    flower))
+  (cons (cons 'flower 'flower)
+    (apply append
+      (map
+        (lambda (x)
+          (map
+            (lambda (y) (cons x y))
+            (append (map 1+ (iota 9)) (make-list 4 'dragon))))
+        '(red green black)))))
 
-;; string -> number
-(define (rank card)
-  (let ([card-char (string-ref card 1)])
-    (and (char-numeric? card-char) (- (char->integer card-char) numeric-offset))))
+(define-record-type state (fields tab res hin flo fou))
 
-;; string -> symbol
-(define (suit card)
-  (let ([c (string-ref card 0)])
-    (cond
-      [(eq? c red-sym) 'red]
-      [(eq? c green-sym) 'green]
-      [(eq? c black-sym) 'black]
-      [(eq? (string-ref card 1) flower-char) 'flower]
-      [else (error 'suit "invalid card" card)])))
+(define state-fields '(tab res hin flo fou))
 
-;; string -> boolean
-(define (flower? card) (eq? flower-char (string-ref card 1)))
+(define (state-sym st sym)
+  (case sym
+    [(tab) (state-tab st)]
+    [(res) (state-res st)]
+    [(hin) (state-hin st)]
+    [(flo) (state-flo st)]
+    [(fou) (state-fou st)]
+    [else (error 'state-sym "invalid field symbol" sym)]))
 
-;; string -> boolean
-(define (dragon? card) (not (or (rank card) (flower? card))))
-
-;; list(list(string)), list(list(string)), list(list(string)), boolean, list(boolean)
-;;    -> closure(game-state)
-(define (make-state ts fs rs f hs)
-  (let ([tableau ts] [foundation fs] [reserve rs] [flower f] [hints hs])
-    (lambda (query)
-      (case query
-        [(tableau) tableau]
-        [(foundation) foundation]
-        [(reserve) reserve]
-        [(flower) flower]
-        [(hints) hints]
-        [else (error 'game-state-closure "invalid query" query)]))))
-
-;; symbol, number, number, symbol, number -> closure(move)
-(define (make-move src-area src-pile ncards dst-area dst-pile)
-  (let ([sa src-area] [sp src-pile] [nc ncards] [da dst-area] [dp dst-pile])
-    (lambda (query)
-      (case query
-        [(src-area) sa]
-        [(src-pile) sp]
-        [(ncards) nc]
-        [(dst-area) da]
-        [(dst-pile) dp]
-        [else (error 'move-closure "invalid query" query)]))))
+(define-record-type move (fields state from n to bot top))
 
 ;; new game generation
 (define max-seed (1- (expt 2 32)))
@@ -158,91 +88,73 @@
 ;; a -> list(a)
 (define (make-piles init) (make-list 3 init))
 
-;; -> closure(game-state)
 (define (make-new-game)
   (random-seed (new-seed))
-    (make-state (deal) (make-piles '()) (make-piles '()) #f (make-piles #f)))
+    (make-state (deal) (make-piles '()) (make-piles #f) #f (make-piles '())))
+
+(define (bottom st loc d)
+  (let ([pile (list-ref (state-sym st (car loc)) (cdr loc))])
+    (car (reverse (take pile d)))))
+
+(define (top st loc)
+  (let ([pile (list-ref (state-sym st (car loc)) (cdr loc))])
+    (if (null? pile) '() (car pile))))
 
 (define (compatible-neighbors? bottom top)
   (and
-    (not (dragon? bottom))
-    (not (eq? (suit bottom) (suit top)))
-    (= (1+ (rank bottom)) (rank top))))
+    (number? (cdr bottom))
+    (number? (cdr top))
+    (not (eq? (car bottom) (car top)))
+    (= (1+ (cdr bottom)) (cdr top))))
 
-;; closure(game-state), closure(move) -> boolean
-(define (valid-tableau-move? state move)
-  (let ([src (list-ref (state (move 'src-area)) (move 'src-pile))]
-         [ncards (move 'ncards)]
-         [dst (list-ref (state (move 'dst-area)) (move 'dst-pile))])
-    (or
-      (null? dst)
-      (compatible-neighbors? (list-ref src (1- ncards)) (car dst)))))
+(define (valid-tableau-move? mv)
+  (or
+    (null? (move-top mv))
+    (compatible-neighbors? (move-bot mv) (move-top mv))))
 
-;; closure(game-state), closure(move) -> boolean
-(define (valid-reserve-move? state move)
-  (let ([ncards (move 'ncards)] [dst (list-ref (state 'reserve) (move 'dst-pile))])
-    (and (null? dst) (not (> ncards 1)))))
+(define (valid-reserve-move? mv)
+    (and (null? (move-top mv)) (not (> (move-n mv) 1))))
 
-;; closure(game-state), closure(move) -> boolean
-(define (valid-foundation-move? state move)
-  (let* ([ncards (move 'ncards)]
-         [src (list-ref (state (move 'src-area)) (move 'src-pile))]
-         [dst-pile (move 'dst-pile)]
-         [dst (list-ref (state 'foundation) dst-pile)])
+(define (valid-foundation-move? mv)
+  (let ([b (move-bot mv)] [t (move-top mv)])
     (and
-      (not (> ncards 1))
-      (eq? (suit (car src)) (list-ref foundation-order dst-pile))
-      (if (null? dst)
-        (= 1 (rank (car src)))
-        (= (rank (car src)) (1+ (rank (car dst))))))))
+      (not (> (move-n mv) 1))
+      (eq? (car b) (list-ref foundation-order (cdr (move-to mv))))
+      (if (null? t)
+        (= 1 (cdr b))
+        (= (cdr b) (1+ (cdr t)))))))
 
-;; closure(game-state), closure(move) -> boolean
-(define (valid-move? state move)
-  (let ([src-area (move 'src-area)] [dst-area (move 'dst-area)])
+(define (valid-move? mv)
+  (let ([to (car (move-to mv))])
     (cond
-      [(eq? dst-area 'tableau) (valid-tableau-move? state move)]
-      [(eq? dst-area 'reserve) (valid-reserve-move? state move)]
-      [(eq? dst-area 'foundation) (valid-foundation-move? state move)]
+      [(eq? to 'tab) (valid-tableau-move? mv)]
+      [(eq? to 'res) (valid-reserve-move? mv)]
+      [(eq? to 'fou) (valid-foundation-move? mv)]
       [else #f])))
 
-;; list(list(string)), number, number, number -> list(string), list(list(string))
-(define (take-cards place width pile n)
-  (let* ([src (list-ref place pile)]
-          [taken (take src n)]
-          [left (list-tail src n)])
-    (let loop ([c width] [place^ '()])
-      (let ([next (1- c)])
-        (cond
-          [(zero? c) (values taken place^)]
-          [(= next pile) (loop next (cons left place^))]
-          [else (loop next (cons (list-ref place next) place^))])))))
+(define (replace-pile area n pile)
+  (let loop ([i (1- (length area))] [area^ '()])
+    (if (< i 0)
+      area^
+      (loop (1- i) (cons (if (= i n) pile (list-ref area i)) area^)))))
 
-;; list(list(string)), number, number, list(string) -> list(list(string))
-(define (give-cards place width pile cards)
-  (let loop ([n width] [place^ '()])
-    (let ([next (1- n)])
-      (cond
-        [(zero? n) place^]
-        [(= next pile) (loop next (cons (append cards (list-ref place pile)) place^))]
-        [else (loop next (cons (list-ref place next) place^))]))))
+(define (do-move mv)
+  (let* ([st (move-state mv)]
+          [from (move-from mv)]
+          [to (move-to mv)]
+          [n (move-n mv)]
+          [src (state-sym st (car from))]
+          [taken (take (list-ref src (cdr from)) n)]
+          [rem (list-tail (list-ref src (cdr from)) n)]
+          [src^ (replace-pile src (cdr from) rem)]
+          [dst (if (eq? (car from) (car to)) src^ (state-sym st (car to)))]
+          [given (append taken (list-ref dst (cdr to)))]
+          [dst^ (replace-pile dst (cdr to) given)])
+    (apply make-state (map (lambda (x) (if (symbol? x) (state-sym st x) x))
+                        (substq src^ (car from) (substq dst^ (car to) state-fields))))))
 
-;; closure(game-state), closure(move) -> closure(game-state)
-(define (do-move state move)
-  (let ([sa (move 'src-area)]
-          [sp (move 'src-pile)]
-          [n (move 'ncards)]
-          [da (move 'dst-area)]
-          [dp (move 'dst-pile)])
-    (let-values ([(cards src^) (take-cards (state sa) (place-width sa) sp n)])
-      (let ([dst^ (give-cards (if (eq? sa da) src^ (state da)) (place-width da) dp cards)])
-        (let ([areas^ (map (lambda (x) (cond [(eq? da x) dst^]
-                                          [(eq? sa x) src^]
-                                          [else (state x)]))
-                        '(tableau foundation reserve))])
-          (make-state (car areas^) (cadr areas^) (caddr areas^) #f (state 'hints)))))))
-
-;; closure(game-state) -> boolean
-(define (won? state) (every (lambda (x) x) (map null? (state 'tableau))))
+(define (won? st) (every (lambda (x) x) (map null? (state-tab st))))
+;; filter null and equal lengths
 
 ;;;; view
 (define game-width 80)
@@ -264,7 +176,7 @@
 (define color-card-border (logior tb-white tb-bold))
 (define color-empty-place (logior tb-black tb-bold))
 (define color-filled-place tb-white)
-(define color-place-key (logior tb-cyan tb-bold))
+(define color-key (logior tb-cyan tb-bold))
 (define color-filled-hint tb-yellow)
 (define color-warn-fg tb-black)
 (define color-warn-bg tb-yellow)
@@ -290,15 +202,33 @@
   '((5 1) (12 1) (19 1) (25 1) (30 1) (35 1) (47 1) (60 1) (67 1) (74 1)
     (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
 
+(define (card-string card)
+  (let ([middle (if (number? (cdr card))
+                  (number->string (cdr card))
+                  (string (char-upcase (string-ref (symbol->string (car card)) 0))))])
+    (case (car card)
+      [(red) (string-append "+" middle "+")]
+      [(green) (string-append "-" middle "-")]
+      [(black) (string-append "*" middle "*")]
+      [(flower) " @ "])))
+
+(define (card-color card)
+  (case (car card)
+    [(red) color-card-red]
+    [(green) color-card-green]
+    [(black) color-card-black]
+    [(flower) color-card-flower]
+    [else #f]))
+
 (define (top-row-loc ch)
   (let ([i (ffq ch place-key-chars)])
     (case i
-      [(0 1 2) (list 'reserve i)]
-      [(7 8 9) (list 'foundation (- i 7))]
+      [(0 1 2) (cons 'res i)]
+      [(7 8 9) (cons 'fou (- i 7))]
       [else #f])))
 
 (define (tab-loc ch)
-  (list 'tableau (ffq ch tab-key-chars)))
+  (cons 'tab (ffq ch tab-key-chars)))
 
 (define (char->location ch)
   (cond
@@ -308,17 +238,9 @@
 
 (define (coords area)
   (case area
-    [(tableau) tab-cs]
-    [(reserve) res-cs]
-    [(foundation-width) fou-cs]))
-
-(define (card-color card)
-  (case (suit card)
-    [(red) color-card-red]
-    [(green) color-card-green]
-    [(black) color-card-black]
-    [(flower) color-card-flower]
-    [else (error 'card-color "invalid card" card)]))
+    [(tab) tab-cs]
+    [(res) res-cs]
+    [(fou) fou-cs]))
 
 (define (add-offsets cs)
   (map (lambda (c) (list (+ (x-offset) (car c)) (+ (y-offset) (cadr c)))) cs))
@@ -352,50 +274,40 @@
       (tb-change-cell right y (char->integer #\│) color-border color-bg)
       (loop (1+ y)))))
 
-(define (display-empty-place color x y)
-  (display-string empty-place color color-bg x y))
-
-(define (display-reverse-place color x y)
-  (display-string empty-place color-bg color x y))
+(define (display-card-place x y)
+  (display-string empty-place color-empty-place color-bg x y))
 
 (define (display-card card x y)
-  (display-string card (card-color card) color-bg x y))
+  (display-string empty-place color-card-border color-bg x y)
+  (display-string (card-string card) (card-color card) color-bg (1+ x) y))
 
-(define (display-reverse-card card x y)
-  (let ([color (card-color card)])
-    (display-string card color-bg
-     (if (eq? color color-card-red) color-card-flower color) x y))) ; suppress blink
-
-(define (display-filled-place card x y)
-  (display-empty-place color-filled-place x y)
-  (display-card card (1+ x) y))
-
-(define (display-highlighted card x y)
-  (display-reverse-place color-filled-place x y)
-  (display-reverse-card card (1+ x) y))
+(define (display-card-reverse card x y)
+  (display-string empty-place color-bg tb-white x y)
+  (let ([cc (card-color card)])
+    (display-string
+      (card-string card) color-bg
+      (if (eq? cc color-card-red) tb-red cc)
+      (1+ x) y)))
 
 (define (display-hint color fill? x y)
   (display-string empty-hint color color-bg x y)
-  (when fill? (tb-change-cell (1+ x) y filled-hint-char color-filled-hint color-bg)))
+  (when fill? (display-string (string filled-hint-char) color-filled-hint color-bg (1+ x) y)))
 
-(define (display-place-key c x y)
-  (tb-change-cell x y (char->integer c) color-place-key color-bg))
+(define (display-key c x y)
+  (tb-change-cell x y (char->integer c) color-key color-bg))
 
-(define (display-place-keys)
-  (define as (append place-key-chars tab-key-chars))
-  (define (dpc c) (display-place-key (car c) (cadr c) (caddr c)))
-  (map dpc (cons-attr-add-offset as key-cs)))
+(define (display-keys)
+  (define (dpc c) (apply display-key c))
+  (map dpc (cons-attr-add-offset key-chars key-cs)))
 
 (define (display-res/fou r/f cs)
   (map
     (lambda (l)
-      (let ([elt (car l)] [x (cadr l)] [y (caddr l)])
-        (if elt
-          (display-filled-place elt x y)
-          (display-empty-place color-empty-place x y))))
-    (map (lambda (a d) (cons a d))
-      (map null-or-card-list r/f)
-      (add-offsets cs))))
+      (let ([card (car l)] [x (cadr l)] [y (caddr l)])
+        (if card
+          (display-card card x y)
+          (display-card-place x y))))
+    (map cons (map null-or-card-list r/f) (add-offsets cs))))
 
 (define (display-hints hin)
   (let ([cs (add-offsets hin-cs)])
@@ -410,19 +322,17 @@
         (append `(,color-card-green ,(cadr hin)) (cadr cs))
         (append `(,color-card-black ,(caddr hin)) (caddr cs))))))
 
-(define (display-flower flo)
+(define (display-flower flo?)
   (let* ([cs (add-offsets flo-cs)] [x (caar cs)] [y (cadar cs)])
-    (if flo
-      (display-filled-place flower x y)
-      (display-empty-place color-empty-place x y))))
+    (if flo? (display-card '(flower flower) x y) (display-card-place x y))))
 
 (define (display-pile pile c)
   (let ([x (car c)] [y0 (cadr c)] [l (length pile)])
     (if (null? pile)
-      (display-empty-place color-empty-place x y0)
+      (display-card-place x y0)
       (let loop ([n 0] [y y0] [p pile])
         (when (< n l)
-          (display-filled-place (car p) x y)
+          (display-card (car p) x y)
           (loop (1+ n) (1+ y) (cdr p)))))))
 
 (define (display-clear-tab)
@@ -437,12 +347,12 @@
   (display-clear-tab)
   (map display-pile (map reverse tab) (add-offsets tab-cs)))
 
-(define (display-game-state state)
-  (let ([res (state 'reserve)]
-         [hin (state 'hints)]
-         [flo (state 'flower)]
-         [fou (state 'foundation)]
-         [tab (state 'tableau)])
+(define (display-state st)
+  (let ([res (state-res st)]
+         [hin (state-hin st)]
+         [flo (state-flo st)]
+         [fou (state-fou st)]
+         [tab (state-tab st)])
     (display-res/fou res res-cs)
     (display-hints hin)
     (display-flower flo)
@@ -452,17 +362,17 @@
 
 (define (display-static-elements)
   (display-border)
-  (display-place-keys)
+  (display-keys)
   (tb-present))
 
-(define (highlight-cards state area pile depth)
-  (let* ([coord (list-ref (coords area) pile)]
-          [ps (list-ref (state area) pile)]
+(define (highlight-cards st src pile depth)
+  (let* ([coord (list-ref (coords src) pile)]
+          [ps (list-ref (state-sym st src) pile)]
           [offset (1- (length ps))])
     (let ([x (car coord)] [y (+ offset (cadr coord))])
       (let loop ([cards (take ps depth)] [y^ y])
         (when (not (null? cards))
-          (display-highlighted (car cards) x y^)
+          (display-card-reverse (car cards) x y^)
           (loop (cdr cards) (1- y^))))))
   (tb-present))
 
@@ -486,7 +396,7 @@
   (warn-msg msg)
   (let ([ev (get-next-event evptr)])
     (clear-msg)
-    (eq? (ev 'char) #\y)))
+    (eq? (event-char ev) #\y)))
 
 (define (resize)
   (let ([w (tb-width)] [h (tb-height)])
@@ -501,28 +411,22 @@
 (define (get-char evptr)
   (integer->char (ftype-ref tb-event (ch) evptr)))
 
-(define (make-event type key char)
-  (let ([t type] [k key] [c char])
-    (lambda (query)
-      (case query
-        [(type) t]
-        [(key) k]
-        [(char) c]))))
+(define-record-type event (fields type key char))
 
 (define (get-next-event evptr)
-  (let ([ev-type (tb-poll-event evptr)])
+  (let ([type (tb-poll-event evptr)])
     (let ([key (ftype-ref tb-event (key) evptr)]
            [char (get-char evptr)])
-      (make-event ev-type key char))))
+      (make-event type key char))))
 
-(define (lookup-keybind event)
-  (let ([key (event 'key)] [char (event 'char)])
+(define (lookup-keybind ev)
+  (let ([key (event-key ev)] [char (event-char ev)])
     (cond
       [(eq? char #\u) 'undo]
       [(eq? char #\z) 'redo]
       [(eq? char #\n) 'new]
       [(eq? key key-esc) 'quit]
-      [(memq char (append place-key-chars tab-key-chars)) 'select])))
+      [(memq char key-chars) 'select])))
 
 (define (undo us rs)
   (if (or (null? us) (null? (cdr us)))
@@ -542,36 +446,39 @@
       (inform-msg (format #f "Move ~a redone." (length us)))
       (values (cons (car rs) us) (cdr rs)))))
 
-(define (maybe-highlight? state area pile ncards)
-  (let ([ps (list-ref (state area) pile)])
-    (if (>= ncards (length ps))
+(define (maybe-highlight? st src pile depth)
+  (let ([ps (list-ref (state-sym st src) pile)])
+    (if (>= depth (length ps))
       #f
-      (let* ([cards (list-tail ps (1- ncards))]
+      (let* ([cards (list-tail ps (1- depth))]
               [curr (car cards)]
-              [next (cadr cards)])
+              [next (cadr cards)]
+              [depth^ (1+ depth)])
         (if (compatible-neighbors? curr next)
-          (begin (highlight-cards state area pile (1+ ncards)) #t)
-          #f)))))
+          (begin (highlight-cards st src pile depth^) depth^)
+          depth)))))
 
-(define (select/move state evptr)
+(define (select/move st evptr)
   (let ([loc (char->location (get-char evptr))])
     (if loc
-      (let ([sa (car loc)] [sp (cadr loc)])
-        (if (null? (list-ref (state sa) sp))
+      (let ([src (car loc)] [pile (cdr loc)])
+        (if (null? (list-ref (state-sym st src) pile))
           (error-msg "Location is empty.")
           (begin
-            (highlight-cards state sa sp 1)
+            (highlight-cards st src pile 1)
             (let loop ([d 1])
-              (let ([loc^ (char->location ((get-next-event evptr) 'char))])
+              (let ([loc^ (char->location (event-char (get-next-event evptr)))])
                 (cond
                   [(not loc^) #f]
-                  [(equal? loc^ loc) (loop (if (maybe-highlight? state sa sp d) (1+ d) d))]
-                  [else (make-move sa sp d (car loc^) (cadr loc^))]))))))
+                  [(equal? loc^ loc) (loop (maybe-highlight? st src pile d))]
+                  [else (make-move st loc d loc^ (bottom st loc d) (top st loc^))]))))))
       #f)))
+
+(define (automove st) #f) ;; here
 
 (define (main-event-loop evptr s0)
   (let loop ([us (list s0)] [rs '()])
-    (display-game-state (car us))
+    (display-state (car us))
     (let ([ev (get-next-event evptr)])
       (clear-msg)
       (case (lookup-keybind ev)
@@ -581,11 +488,11 @@
                  (loop (list (make-new-game)) '()))]
         [(quit) (when (warn-ask "Quit game? (Y/N)" evptr)
                   (raise (make-message-condition "quit game")))]
-        [(select) (let* ([st (car us)] [mv (select/move st evptr)])
+        [(select) (let ([mv (select/move (car us) evptr)])
                     (when mv
-                      (if (not (valid-move? st mv))
+                      (if (not (valid-move? mv))
                         (error-msg "Invalid move.")
-                        (loop (cons (do-move st mv) us) '()))))]
+                        (loop (cons (do-move mv) us) '()))))]
         [else (error-msg "Command not recognized.")]))
     (loop us rs)))
 
@@ -604,5 +511,8 @@
         (main-event-loop ev (make-new-game))))
     (cleanup)))
 
-;; TODO: The meaning of ncards in highlight is different from ncards in take/give and it's clashing
 ;; TODO: Game shuffling is SHITE
+;; TODO: Automove
+;; TODO: Dragons state
+;; TODO: Decompose into multi files?
+;; TODO: Document (at least type sigs)

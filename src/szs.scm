@@ -175,7 +175,6 @@
 (define color-empty-place (logior tb-black tb-bold))
 (define color-filled-place tb-white)
 (define color-key (logior tb-cyan tb-bold))
-(define color-filled-hint tb-yellow)
 (define color-warn-fg tb-black)
 (define color-warn-bg tb-yellow)
 (define color-inform-fg tb-white)
@@ -287,7 +286,7 @@
 
 (define (display-hint color fill? x y)
   (display-string empty-hint color color-bg x y)
-  (when fill? (display-string (string filled-hint-char) color-filled-hint color-bg (1+ x) y)))
+  (when fill? (display-string (string filled-hint-char) color color-bg (1+ x) y)))
 
 (define (display-key c x y)
   (tb-change-cell x y (char->integer c) color-key color-bg))
@@ -488,7 +487,6 @@
     (filter number?
       (map (lambda (x) (or (and (pair? x) (cdr x)) 1)) (map scar fou)))))
 
-
 (define (move-off st src)
   (let* ([src-top (top st src)]
           [dst (case (car src-top)
@@ -498,12 +496,23 @@
                  [(flower) '(flo . 0)])])
     (make-move st src 1 dst src-top (top st dst))))
 
+(define (dragons-collectable? st)
+  (define (cfilter color) (lambda (x) (and (pair? x) (eq? (car x) color))))
+  (let* ([tops (map scar (append (state-res st )(state-tab st)))]
+          [ds (filter (lambda (x) (and (pair? x) (eq? (cdr x) 'dragon))) tops)])
+    (map (lambda (x) (= 4 (length (filter (cfilter x) ds)))) '(red green black))))
+
+(define (update-hints st hs)
+  (make-state (state-tab st) (state-res st) hs (state-flo st) (state-fou st)))
+
 (define (automove st)
   (let ([flower? (and (null? (car (state-flo st))) (find-target st 'flower))]
-         [next-target? (find-target st (min-visible (state-fou st)))])
+         [next-target? (find-target st (min-visible (state-fou st)))]
+         [ds (dragons-collectable? st)])
     (cond
       [flower? (automove (do-move (move-off st flower?)))]
       [next-target? (automove (do-move (move-off st next-target?)))]
+      [(not (equal? ds (state-hin st))) (update-hints st ds)]
       [else st])))
 
 (define (main-event-loop evptr s0)
@@ -541,7 +550,7 @@
         (main-event-loop ev (make-new-game))))
     (cleanup)))
 
-;; TODO: Dragons state
 ;; TODO: Game shuffling is SHITE
+;; TODO: Simplify flo, fou
 ;; TODO: Decompose into multi files?
 ;; TODO: Document (at least type sigs)

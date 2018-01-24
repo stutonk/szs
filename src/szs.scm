@@ -19,6 +19,8 @@
       (- (length lst) (length mem?))
       mem?)))
 
+(define (scar p) (if (pair? p) (car p) #f))
+
 (define tableau-num-piles 8)
 (define tabelau-pile-depth 5)
 
@@ -86,7 +88,7 @@
 
 (define (make-new-game)
   (random-seed (new-seed))
-    (make-state (deal) (make-piles '()) (make-piles #f) #f (make-piles '())))
+    (make-state (deal) (make-piles '()) (make-piles #f) '(()) (make-piles '())))
 
 (define (bottom st loc d)
   (let ([pile (list-ref (state-sym st (car loc)) (cdr loc))])
@@ -96,12 +98,12 @@
   (let ([pile (list-ref (state-sym st (car loc)) (cdr loc))])
     (if (null? pile) '() (car pile))))
 
-(define (compatible-neighbors? bottom top)
+(define (compatible-neighbors? b t)
   (and
-    (number? (cdr bottom))
-    (number? (cdr top))
-    (not (eq? (car bottom) (car top)))
-    (= (1+ (cdr bottom)) (cdr top))))
+    (number? (cdr b))
+    (number? (cdr t))
+    (not (eq? (car b) (car t)))
+    (= (1+ (cdr b)) (cdr t))))
 
 (define (valid-tableau-move? mv)
   (or
@@ -126,6 +128,7 @@
       [(eq? to 'tab) (valid-tableau-move? mv)]
       [(eq? to 'res) (valid-reserve-move? mv)]
       [(eq? to 'fou) (valid-foundation-move? mv)]
+      [(and (eq? to 'flo) (eq? (car (move-bot mv)) 'flower)) #t]
       [else #f])))
 
 (define (replace-pile area n pile)
@@ -243,8 +246,6 @@
 (define (cons-attr-add-offset as cs)
   (map (lambda (a c) (cons a c)) as (add-offsets cs)))
 
-(define (null-or-card-list lst) (if (null? lst) #f (car lst)))
-
 (define (display-string str fg bg x0 y)
   (map
     (lambda (c x) (tb-change-cell x y (char->integer c) fg bg))
@@ -302,7 +303,7 @@
         (if card
           (display-card card x y)
           (display-card-place x y))))
-    (map cons (map null-or-card-list r/f) (add-offsets cs))))
+    (map cons (map scar r/f) (add-offsets cs))))
 
 (define (display-hints hin)
   (let ([cs (add-offsets hin-cs)])
@@ -319,7 +320,7 @@
 
 (define (display-flower flo?)
   (let* ([cs (add-offsets flo-cs)] [x (caar cs)] [y (cadar cs)])
-    (if flo? (display-card '(flower flower) x y) (display-card-place x y))))
+    (if (pair? (car flo?)) (display-card '(flower flower) x y) (display-card-place x y))))
 
 (define (display-pile pile c)
   (let ([x (car c)] [y0 (cadr c)] [l (length pile)])
@@ -469,10 +470,44 @@
                   [else (make-move st loc d loc^ (bottom st loc d) (top st loc^))]))))))
       #f)))
 
-(define (automove st) #f) ;; here
+(define (find-in-loc loc lst t)
+  (let ([first
+         (scar
+           (filter number?
+             (map (lambda (x y) (if (and (pair? x) (eq? t (cdr x))) y #f))
+               lst (enumerate lst))))])
+    (if first (cons loc first) #f)))
+
+(define (find-target st t)
+  (let ([tab-tops (map scar (state-tab st))]
+         [res-tops (map scar (state-res st))])
+    (or (find-in-loc 'res res-tops t) (find-in-loc 'tab tab-tops t))))
+
+(define (min-visible fou)
+  (apply min
+    (filter number?
+      (map (lambda (x) (or (and (pair? x) (cdr x)) 1)) (map scar fou)))))
+
+
+(define (move-off st src)
+  (let* ([src-top (top st src)]
+          [dst (case (car src-top)
+                 [(red) '(fou . 0)]
+                 [(green) '(fou . 1)]
+                 [(black) '(fou . 2)]
+                 [(flower) '(flo . 0)])])
+    (make-move st src 1 dst src-top (top st dst))))
+
+(define (automove st)
+  (let ([flower? (and (null? (car (state-flo st))) (find-target st 'flower))]
+         [next-target? (find-target st (min-visible (state-fou st)))])
+    (cond
+      [flower? (automove (do-move (move-off st flower?)))]
+      [next-target? (automove (do-move (move-off st next-target?)))]
+      [else st])))
 
 (define (main-event-loop evptr s0)
-  (let loop ([us (list s0)] [rs '()])
+  (let loop ([us (list (automove s0))] [rs '()])
     (display-state (car us))
     (let ([ev (get-next-event evptr)])
       (clear-msg)
@@ -487,7 +522,7 @@
                     (when mv
                       (if (not (valid-move? mv))
                         (error-msg "Invalid move.")
-                        (loop (cons (do-move mv) us) '()))))]
+                        (loop (cons (automove (do-move mv)) us) '()))))]
         [else (error-msg "Command not recognized.")]))
     (loop us rs)))
 
@@ -506,8 +541,7 @@
         (main-event-loop ev (make-new-game))))
     (cleanup)))
 
-;; TODO: Game shuffling is SHITE
-;; TODO: Automove
 ;; TODO: Dragons state
+;; TODO: Game shuffling is SHITE
 ;; TODO: Decompose into multi files?
 ;; TODO: Document (at least type sigs)

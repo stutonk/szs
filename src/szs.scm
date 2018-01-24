@@ -12,10 +12,6 @@
       (reverse ys)
       (loop (1- n) (cdr xs) (cons (car xs) ys)))))
 
-;; (a -> boolean), list(a) -> boolean
-(define (every pred lst)
-  (if (null? lst) #t (and (pred (car lst)) (every pred (cdr lst)))))
-
 ;; a, list(a) -> number
 (define (ffq elt lst)
   (let ([mem? (memq elt lst)])
@@ -153,8 +149,7 @@
     (apply make-state (map (lambda (x) (if (symbol? x) (state-sym st x) x))
                         (substq src^ (car from) (substq dst^ (car to) state-fields))))))
 
-(define (won? st) (every (lambda (x) x) (map null? (state-tab st))))
-;; filter null and equal lengths
+(define (won? st) (= tableau-num-piles (length (filter null? (state-tab st)))))
 
 ;;;; view
 (define game-width 80)

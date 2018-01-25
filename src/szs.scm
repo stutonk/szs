@@ -22,7 +22,7 @@
 (define (scar p) (if (pair? p) (car p) #f))
 
 (define tableau-num-piles 8)
-(define tabelau-pile-depth 5)
+(define tableau-pile-depth 5)
 
 (define reserve-width 3)
 
@@ -72,16 +72,25 @@
                (random (time-second (current-time))))])
       (or (and (zero? t) s) (- (max-seed s))))))
 
-;; -> list(list(string))
+(define (shuffle lst)
+  (cond
+    [(> (length lst) 2)
+     (let loop ([l lst] [left '()] [right '()])
+       (if (null? l)
+         (append (shuffle left) (shuffle right))
+         (if (zero? (random 2))
+           (loop (cdr l) (cons (car l) left) right)
+           (loop (cdr l) left (cons (car l) right)))))]
+    [(zero? (random 2)) (reverse lst)]
+    [else lst]))
+
+;; -> list(list(card))
 (define (deal)
-  (let loop ([dck deck] [tab (make-list tableau-num-piles '())])
-    (if (null? dck)
-      (list-rotate tab (random tableau-num-piles))
-      (let skip ([tab^ (list-rotate tab (random tableau-num-piles))])
-        (if (>= (length (car tab^)) tabelau-pile-depth)
-          (skip (list-rotate tab^ 1))
-          (loop (cdr dck)
-            (cons (cons (car dck) (car tab^)) (cdr tab^))))))))
+  (let loop ([n tableau-num-piles] [d (shuffle deck)] [deck^ '()])
+    (if (zero? n) deck^
+      (loop (1- n)
+        (list-tail d tableau-pile-depth)
+        (cons (take d tableau-pile-depth) deck^)))))
 
 ;; a -> list(a)
 (define (make-piles init) (make-list 3 init))
@@ -623,7 +632,7 @@
         (main-event-loop ev (make-new-game))))
     (cleanup)))
 
-;; TODO: Game shuffling is SHITE
-;; TODO: Simplify flo, fou
+;; TODO: Game win msg
+;; Change bottom border/msg loc
 ;; TODO: Decompose into multi files?
 ;; TODO: Document (at least type sigs)

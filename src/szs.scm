@@ -123,13 +123,15 @@
         (= (cdr b) (1+ (cdr t)))))))
 
 (define (valid-move? mv)
-  (let ([to (car (move-to mv))])
-    (cond
-      [(eq? to 'tab) (valid-tableau-move? mv)]
-      [(eq? to 'res) (valid-reserve-move? mv)]
-      [(eq? to 'fou) (valid-foundation-move? mv)]
-      [(and (eq? to 'flo) (eq? (car (move-bot mv)) 'flower)) #t]
-      [else #f])))
+  (let ([to (car (move-to mv))]
+         [bot (move-bot mv)])
+    (if (eq? (cdr bot) 'collect) #f
+      (cond
+        [(eq? to 'tab) (valid-tableau-move? mv)]
+        [(eq? to 'res) (valid-reserve-move? mv)]
+        [(eq? to 'fou) (valid-foundation-move? mv)]
+        [(and (eq? to 'flo) (eq? (car (move-bot mv)) 'flower)) #t]
+        [else #f]))))
 
 (define (replace-pile area n pile)
   (let loop ([i (1- (length area))] [area^ '()])
@@ -137,7 +139,51 @@
       area^
       (loop (1- i) (cons (if (= i n) pile (list-ref area i)) area^)))))
 
-(define (do-move mv)
+(define (remove-tops area piles)
+  (let loop ([i (1- (length area))] [ps (sort > piles)] [area^ '()])
+    (cond
+      [(negative? i) area^]
+      [(and (pair? ps) (= i (car ps)))
+        (loop (1- i) (cdr ps) (cons (cdr (list-ref area i)) area^))]
+      [else (loop (1- i) ps (cons (list-ref area i) area^))])))
+
+(define (find-in-loc loc lst t)
+  (let ([first
+         (scar
+           (filter number?
+             (map (lambda (x y) (if (and (pair? x) (eq? t (cdr x))) y #f))
+               lst (enumerate lst))))])
+    (if first (cons loc first) #f)))
+
+(define (find-target st t)
+  (let ([tab-tops (map scar (state-tab st))]
+         [res-tops (map scar (state-res st))])
+    (or (find-in-loc 'res res-tops t) (find-in-loc 'tab tab-tops t))))
+
+(define (min-visible fou)
+  (1+ (apply min
+        (filter number?
+          (map (lambda (x) (or (and (pair? x) (cdr x)) 0)) (map scar fou))))))
+
+(define (move-off st src)
+  (let* ([src-top (top st src)]
+          [dst (case (car src-top)
+                 [(red) '(fou . 0)]
+                 [(green) '(fou . 1)]
+                 [(black) '(fou . 2)]
+                 [(flower) '(flo . 0)])])
+    (make-move st src 1 dst src-top (top st dst))))
+
+(define (dragons-collectable? st)
+  (define (cfilter color) (lambda (x) (and (pair? x) (eq? (car x) color))))
+  (let* ([tops (map scar (append (state-res st )(state-tab st)))]
+          [ds (filter (lambda (x) (and (pair? x) (eq? (cdr x) 'dragon))) tops)])
+    (map (lambda (x) (= 4 (length (filter (cfilter x) ds)))) '(red green black))))
+
+(define (update-hints st hs)
+  (make-state (state-tab st) (state-res st) hs (state-flo st) (state-fou st)))
+
+(define (single-move mv)
   (let* ([st (move-state mv)]
           [from (move-from mv)]
           [to (move-to mv)]
@@ -149,8 +195,59 @@
           [dst (if (eq? (car from) (car to)) src^ (state-sym st (car to)))]
           [given (append taken (list-ref dst (cdr to)))]
           [dst^ (replace-pile dst (cdr to) given)])
-    (apply make-state (map (lambda (x) (if (symbol? x) (state-sym st x) x))
-                        (substq src^ (car from) (substq dst^ (car to) state-fields))))))
+    (automove
+      (apply make-state
+        (map (lambda (x) (if (symbol? x) (state-sym st x) x))
+          (substq src^ (car from) (substq dst^ (car to) state-fields)))))))
+
+(define (automove st)
+  (let ([flower? (and (null? (car (state-flo st))) (find-target st 'flower))]
+         [next-target? (find-target st (min-visible (state-fou st)))]
+         [ds (dragons-collectable? st)])
+    (cond
+      [flower? (single-move (move-off st flower?))]
+      [next-target? (single-move (move-off st next-target?))]
+      [(not (equal? ds (state-hin st))) (update-hints st ds)]
+      [else st])))
+
+(define (collect-loc res-tops color)
+  (let loop ([i 0] [rs res-tops])
+    (cond
+      [(>= i (length res-tops)) #f]
+      [(not (car rs)) i]
+      [(and (eq? (caar rs) color) (eq? (cdar rs) 'dragon)) i]
+      [else (loop (1+ i) (cdr rs))])))
+
+(define (put-dragons-res res pile color)
+  (let loop ([i (1- (length res))] [res^ '()])
+    (if (negative? i)
+      res^
+      (let ([reselt (list-ref res i)])
+        (cond
+          [(= i pile)
+            (loop (1- i) (cons `((,color . collect)) res^))]
+          [(and (pair? reselt) (eq? (caar reselt) color))
+            (loop (1- i) (cons '() res^))]
+          [else (loop (1- i) (cons reselt res^))])))))
+
+(define (move-dragons st locs dstpile color)
+  (automove
+    (make-state
+      (remove-tops (state-tab st) locs)
+      (put-dragons-res (state-res st) dstpile color)
+      (state-hin st) (state-flo st) (state-fou st))))
+
+(define (collect-dragons st color)
+  (define (dragon-loc tops)
+    (map (lambda (x y)
+           (if (and (pair? x) (eq? (car x) color) (eq? (cdr x) 'dragon))
+             y #f))
+      tops (enumerate tops)))
+  (let* ([res-tops (map scar (state-res st))]
+          [tab-tops (map scar (state-tab st))]
+          [locs (filter number? (dragon-loc tab-tops))]
+          [dstpile (collect-loc res-tops color)])
+    (if dstpile (move-dragons st locs dstpile color) st)))
 
 (define (won? st) (= tableau-num-piles (length (filter null? (state-tab st)))))
 
@@ -183,9 +280,13 @@
 (define color-error-bg tb-red)
 
 (define key-esc 27)
-(define place-key-chars '(#\q #\w #\e #\r #\t #\y #\space #\i #\o #\p))
+(define top-key-chars '(#\q #\w #\e #\i #\o #\p))
+(define hin-key-chars '(#\r #\t #\y))
 (define tab-key-chars '(#\a #\s #\d #\f #\j #\k #\l #\;))
-(define key-chars (append place-key-chars tab-key-chars))
+(define display-key-chars
+  (append (take top-key-chars 3) hin-key-chars '(#\space)
+    (list-tail top-key-chars 3) tab-key-chars))
+(define move-key-chars (append top-key-chars tab-key-chars))
 (define empty-place "[   ]")
 (define empty-hint "( )")
 (define filled-hint-char #\!)
@@ -199,15 +300,21 @@
   '((5 1) (12 1) (19 1) (25 1) (30 1) (35 1) (47 1) (60 1) (67 1) (74 1)
     (8 5) (17 5) (26 5) (35 5) (44 5) (53 5) (62 5) (71 5)))
 
+(define (side-string color)
+  (case color
+    [(red) "+"]
+    [(green) "-"]
+    [(black) "*"]))
+
 (define (card-string card)
-  (let ([middle (if (number? (cdr card))
-                  (number->string (cdr card))
-                  (string (char-upcase (string-ref (symbol->string (car card)) 0))))])
-    (case (car card)
-      [(red) (string-append "+" middle "+")]
-      [(green) (string-append "-" middle "-")]
-      [(black) (string-append "*" middle "*")]
-      [(flower) " @ "])))
+  (if (eq? 'flower (car card)) " @ "
+    (let ([middle
+            (cond
+              [(number? (cdr card)) (number->string (cdr card))]
+              [(eq? (cdr card) 'collect) (side-string (car card))]
+              [else (string (char-upcase (string-ref (symbol->string (car card)) 0)))])]
+           [sstr (side-string (car card))])
+          (string-append sstr middle sstr))))
 
 (define (card-color card)
   (case (car card)
@@ -218,10 +325,10 @@
     [else #f]))
 
 (define (top-row-loc ch)
-  (let ([i (ffq ch place-key-chars)])
+  (let ([i (ffq ch top-key-chars)])
     (case i
       [(0 1 2) (cons 'res i)]
-      [(7 8 9) (cons 'fou (- i 7))]
+      [(3 4 5) (cons 'fou (- i 3))]
       [else #f])))
 
 (define (tab-loc ch)
@@ -229,7 +336,7 @@
 
 (define (char->location ch)
   (cond
-    [(memq ch place-key-chars) (top-row-loc ch)]
+    [(memq ch top-key-chars) (top-row-loc ch)]
     [(memq ch tab-key-chars) (tab-loc ch)]
     [else #f]))
 
@@ -293,7 +400,7 @@
 
 (define (display-keys)
   (define (dpc c) (apply display-key c))
-  (map dpc (cons-attr-add-offset key-chars key-cs)))
+  (map dpc (cons-attr-add-offset display-key-chars key-cs)))
 
 (define (display-res/fou r/f cs)
   (map
@@ -421,7 +528,8 @@
       [(eq? char #\z) 'redo]
       [(eq? char #\n) 'new]
       [(eq? key key-esc) 'quit]
-      [(memq char key-chars) 'select])))
+      [(memq char hin-key-chars) 'collect]
+      [(memq char move-key-chars) 'select])))
 
 (define (undo us rs)
   (if (or (null? us) (null? (cdr us)))
@@ -469,51 +577,12 @@
                   [else (make-move st loc d loc^ (bottom st loc d) (top st loc^))]))))))
       #f)))
 
-(define (find-in-loc loc lst t)
-  (let ([first
-         (scar
-           (filter number?
-             (map (lambda (x y) (if (and (pair? x) (eq? t (cdr x))) y #f))
-               lst (enumerate lst))))])
-    (if first (cons loc first) #f)))
-
-(define (find-target st t)
-  (let ([tab-tops (map scar (state-tab st))]
-         [res-tops (map scar (state-res st))])
-    (or (find-in-loc 'res res-tops t) (find-in-loc 'tab tab-tops t))))
-
-(define (min-visible fou)
-  (apply min
-    (filter number?
-      (map (lambda (x) (or (and (pair? x) (cdr x)) 1)) (map scar fou)))))
-
-(define (move-off st src)
-  (let* ([src-top (top st src)]
-          [dst (case (car src-top)
-                 [(red) '(fou . 0)]
-                 [(green) '(fou . 1)]
-                 [(black) '(fou . 2)]
-                 [(flower) '(flo . 0)])])
-    (make-move st src 1 dst src-top (top st dst))))
-
-(define (dragons-collectable? st)
-  (define (cfilter color) (lambda (x) (and (pair? x) (eq? (car x) color))))
-  (let* ([tops (map scar (append (state-res st )(state-tab st)))]
-          [ds (filter (lambda (x) (and (pair? x) (eq? (cdr x) 'dragon))) tops)])
-    (map (lambda (x) (= 4 (length (filter (cfilter x) ds)))) '(red green black))))
-
-(define (update-hints st hs)
-  (make-state (state-tab st) (state-res st) hs (state-flo st) (state-fou st)))
-
-(define (automove st)
-  (let ([flower? (and (null? (car (state-flo st))) (find-target st 'flower))]
-         [next-target? (find-target st (min-visible (state-fou st)))]
-         [ds (dragons-collectable? st)])
-    (cond
-      [flower? (automove (do-move (move-off st flower?)))]
-      [next-target? (automove (do-move (move-off st next-target?)))]
-      [(not (equal? ds (state-hin st))) (update-hints st ds)]
-      [else st])))
+(define (which-dragons? evptr)
+  (case (get-char evptr)
+    [(#\r) 'red]
+    [(#\t) 'green]
+    [(#\y) 'black]
+    [else (error 'which-dragons? "invalid hint key" (get-char evptr))]))
 
 (define (main-event-loop evptr s0)
   (let loop ([us (list (automove s0))] [rs '()])
@@ -531,7 +600,11 @@
                     (when mv
                       (if (not (valid-move? mv))
                         (error-msg "Invalid move.")
-                        (loop (cons (automove (do-move mv)) us) '()))))]
+                        (loop (cons (single-move mv) us) '()))))]
+        [(collect)
+         (loop
+           (cons (collect-dragons (car us) (which-dragons? evptr)) us)
+           '())]
         [else (error-msg "Command not recognized.")]))
     (loop us rs)))
 

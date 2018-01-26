@@ -614,16 +614,19 @@
 
 (define (win evptr)
   (display-clear-tab)
-  (display-string "You win!!" tb-white color-bg
+  (display-string "You won!!" tb-white color-bg
     (+ 35 (x-offset)) (+ 12 (y-offset)))
   (inform-msg "Congratulations!!")
-  (tb-present))
+  (tb-present)
+  (get-next-event evptr)
+  (clear-msg))
 
 (define (main-event-loop evptr s0)
   (let loop ([us (list (automove s0))] [rs '()])
     (display-state (car us))
     (when (won? (car us)) (win evptr) (loop (list (automove (make-new-game))) '()))
     (let ([ev (get-next-event evptr)] [st (car us)])
+      ;(when (= tb-event-resize (event-type ev)) (resize))
       (clear-msg)
       (case (lookup-keybind ev)
         [(undo) (let-values ([(us^ rs^) (undo us rs)]) (loop us^ rs^))]
@@ -661,3 +664,4 @@
 
 ;; TODO: Decompose into multi files?
 ;; TODO: Document (at least type sigs)
+;; TODO: Consider removing resize code

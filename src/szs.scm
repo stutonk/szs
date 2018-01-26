@@ -242,7 +242,7 @@
       (let ([elt (list-ref res i)])
         (cond
           [(= i pile)
-            (loop (1- i) (cons (make-card color 'collect) res^))]
+            (loop (1- i) (cons `(,(make-card color 'collect)) res^))]
           [(and (pair? elt) (suitq? (car elt) color))
             (loop (1- i) (cons '() res^))]
           [else (loop (1- i) (cons elt res^))])))))
@@ -603,9 +603,17 @@
     [(#\y) 'black]
     [else (error 'which-dragons? "invalid hint key" (get-char evptr))]))
 
+(define (win evptr)
+  (display-clear-tab)
+  (display-string "You win!!" tb-white color-bg (+ 40 (x-offset)) (+ 9 (y-offset)))
+  (inform-msg "Congratulations!!")
+  (tb-present)
+  (get-next-event evptr))
+
 (define (main-event-loop evptr s0)
   (let loop ([us (list (automove s0))] [rs '()])
     (display-state (car us))
+    (when (won? (car us)) (win evptr) (loop (list (make-new-game)) '()))
     (let ([ev (get-next-event evptr)])
       (clear-msg)
       (case (lookup-keybind ev)
@@ -643,6 +651,5 @@
     (cleanup)))
 
 ;; TODO: Game win msg
-;; Change bottom border/msg loc
 ;; TODO: Decompose into multi files?
 ;; TODO: Document (at least type sigs)

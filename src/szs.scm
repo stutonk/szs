@@ -273,7 +273,7 @@
 (define game-height 24)
 (define x-offset (make-parameter 0))
 (define y-offset (make-parameter 0))
-(define msg-area-y (1- game-height))
+(define msg-area-y (+ game-height -2))
 (define first-tableau-line 6)
 (define max-tableau-height 13)
 (define tableau-char-width 68)
@@ -327,10 +327,10 @@
   (if (eq? 'flower (car card)) " @ "
     (let ([middle
             (cond
-              [(number? (cdr card)) (number->string (cdr card))]
-              [(eq? (cdr card) 'collect) (side-string (car card))]
-              [else (string (char-upcase (string-ref (symbol->string (car card)) 0)))])]
-           [sstr (side-string (car card))])
+              [(number? (rank card)) (number->string (rank card))]
+              [(rankq? card 'collect) (side-string (suit card))]
+              [else (string (char-upcase (string-ref (symbol->string (suit card)) 0)))])]
+           [sstr (side-string (suit card))])
           (string-append sstr middle sstr))))
 
 (define (card-color card)
@@ -377,7 +377,7 @@
 
 (define (display-border)
   (define top (y-offset))
-  (define bottom (+ (y-offset) game-height -2))
+  (define bottom (+ (y-offset) game-height -1))
   (define left (x-offset))
   (define right (+ (x-offset) game-width -1))
   (define (display-bar lc rc x y)
@@ -497,13 +497,15 @@
 
 (define (display-msg msg fg bg)
   (let ([mlen (string-length msg)])
-    (when (> mlen game-width)
+    (when (> mlen (+ game-width -2))
       (error 'display-msg "message too long" msg))
-    (display-string msg fg bg 0 msg-area-y)
-    (display-string (make-string (- game-width mlen) #\space) fg bg mlen msg-area-y)
+    (display-string msg fg bg 1 msg-area-y)
+    (display-string
+      (make-string (- game-width mlen 2) #\space)
+      color-bg color-bg (1+ mlen) msg-area-y)
     (tb-present)))
 
-(define (clear-msg) (display-msg "" tb-default tb-default) #t)
+(define (clear-msg) (display-msg "" color-bg color-bg) #t)
 
 (define (error-msg msg) (display-msg msg color-error-fg color-error-bg) #f)
 

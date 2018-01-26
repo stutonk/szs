@@ -266,6 +266,13 @@
           [dstpile (collect-loc res-tops color)])
     (if dstpile (move-dragons st locs dstpile color) st)))
 
+(define (hint-active? st color)
+  (let ([hin (state-hin st)])
+    (case color
+      [(red) (car hin)]
+      [(green) (cadr hin)]
+      [(black) (caddr hin)])))
+
 (define (won? st) (= tableau-num-piles (length (filter null? (state-tab st)))))
 
 ;;;; view
@@ -616,7 +623,7 @@
   (let loop ([us (list (automove s0))] [rs '()])
     (display-state (car us))
     (when (won? (car us)) (win evptr) (loop (list (automove (make-new-game))) '()))
-    (let ([ev (get-next-event evptr)])
+    (let ([ev (get-next-event evptr)] [st (car us)])
       (clear-msg)
       (case (lookup-keybind ev)
         [(undo) (let-values ([(us^ rs^) (undo us rs)]) (loop us^ rs^))]
@@ -625,15 +632,15 @@
                  (loop (list (automove (make-new-game))) '()))]
         [(quit) (when (warn-ask "Quit game? (Y/N)" evptr)
                   (raise (make-message-condition "quit game")))]
-        [(select) (let ([mv (select/move (car us) evptr)])
+        [(select) (let ([mv (select/move st evptr)])
                     (when mv
                       (if (not (valid-move? mv))
                         (error-msg "Invalid move.")
                         (loop (cons (single-move mv) us) '()))))]
         [(collect)
-         (loop
-           (cons (collect-dragons (car us) (which-dragons? evptr)) us)
-           '())]
+         (let ([color (which-dragons? evptr)])
+           (when (hint-active? st color)
+             (loop (cons (collect-dragons st color) us) '())))]
         [else (error-msg "Command not recognized.")]))
     (loop us rs)))
 
@@ -652,6 +659,5 @@
         (main-event-loop ev (make-new-game))))
     (cleanup)))
 
-;; TODO: Game win msg
 ;; TODO: Decompose into multi files?
 ;; TODO: Document (at least type sigs)

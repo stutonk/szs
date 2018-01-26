@@ -243,7 +243,7 @@
         (cond
           [(= i pile)
             (loop (1- i) (cons `(,(make-card color 'collect)) res^))]
-          [(and (pair? elt) (suitq? (car elt) color))
+          [(and (pair? elt) (suitq? (car elt) color) (rankq? (car elt) 'dragon))
             (loop (1- i) (cons '() res^))]
           [else (loop (1- i) (cons elt res^))])))))
 

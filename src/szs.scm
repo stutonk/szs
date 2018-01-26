@@ -37,13 +37,21 @@
     [(foundation) foundation-width]
     [else (error 'place-width "invalid place" place)]))
 
+(define (make-card suit rank) (cons suit rank))
+(define (card? card) (and (pair? card) (not (null? (cdr card)))))
+(define (suit card) (car card))
+(define (suitq? card s) (eq? (suit card) s))
+(define (rank card) (cdr card))
+(define (rankq? card r) (eq? (rank card) r))
+(define (succrank? a b) (= (1+ (rank a)) (rank b)))
+
 (define deck
-  (cons (cons 'flower 'flower)
+  (cons (make-card 'flower 'flower)
     (apply append
       (map
         (lambda (x)
           (map
-            (lambda (y) (cons x y))
+            (lambda (y) (make-card x y))
             (append (map 1+ (iota 9)) (make-list 4 'dragon))))
         '(red green black)))))
 
@@ -109,10 +117,10 @@
 
 (define (compatible-neighbors? b t)
   (and
-    (number? (cdr b))
-    (number? (cdr t))
-    (not (eq? (car b) (car t)))
-    (= (1+ (cdr b)) (cdr t))))
+    (number? (rank b))
+    (number? (rank t))
+    (not (suitq? b (suit t)))
+    (succrank? b t)))
 
 (define (valid-tableau-move? mv)
   (or
@@ -126,20 +134,20 @@
   (let ([b (move-bot mv)] [t (move-top mv)])
     (and
       (not (> (move-n mv) 1))
-      (eq? (car b) (list-ref foundation-order (cdr (move-to mv))))
+      (suitq? b (list-ref foundation-order (cdr (move-to mv))))
       (if (null? t)
-        (= 1 (cdr b))
-        (= (cdr b) (1+ (cdr t)))))))
+        (= 1 (rank b))
+        (succrank? t b)))))
 
 (define (valid-move? mv)
   (let ([to (car (move-to mv))]
          [bot (move-bot mv)])
-    (if (eq? (cdr bot) 'collect) #f
+    (if (or (rankq? bot 'collect) (suitq? (move-from mv) 'fou)) #f
       (cond
         [(eq? to 'tab) (valid-tableau-move? mv)]
         [(eq? to 'res) (valid-reserve-move? mv)]
         [(eq? to 'fou) (valid-foundation-move? mv)]
-        [(and (eq? to 'flo) (eq? (car (move-bot mv)) 'flower)) #t]
+        [(and (eq? to 'flo) (suitq? (move-bot mv) 'flower)) #t]
         [else #f]))))
 
 (define (replace-pile area n pile)
@@ -160,7 +168,7 @@
   (let ([first
          (scar
            (filter number?
-             (map (lambda (x y) (if (and (pair? x) (eq? t (cdr x))) y #f))
+             (map (lambda (x y) (if (and (card? x) (rankq? x t)) y #f))
                lst (enumerate lst))))])
     (if first (cons loc first) #f)))
 
@@ -169,14 +177,14 @@
          [res-tops (map scar (state-res st))])
     (or (find-in-loc 'res res-tops t) (find-in-loc 'tab tab-tops t))))
 
-(define (min-visible fou)
+(define (next-target fou)
   (1+ (apply min
         (filter number?
-          (map (lambda (x) (or (and (pair? x) (cdr x)) 0)) (map scar fou))))))
+          (map (lambda (x) (or (and (card? x) (rank x)) 0)) (map scar fou))))))
 
 (define (move-off st src)
   (let* ([src-top (top st src)]
-          [dst (case (car src-top)
+          [dst (case (suit src-top)
                  [(red) '(fou . 0)]
                  [(green) '(fou . 1)]
                  [(black) '(fou . 2)]
@@ -184,9 +192,9 @@
     (make-move st src 1 dst src-top (top st dst))))
 
 (define (dragons-collectable? st)
-  (define (cfilter color) (lambda (x) (and (pair? x) (eq? (car x) color))))
+  (define (cfilter color) (lambda (x) (and (card? x) (suitq? x color))))
   (let* ([tops (map scar (append (state-res st )(state-tab st)))]
-          [ds (filter (lambda (x) (and (pair? x) (eq? (cdr x) 'dragon))) tops)])
+          [ds (filter (lambda (x) (and (card? x) (rankq? x 'dragon))) tops)])
     (map (lambda (x) (= 4 (length (filter (cfilter x) ds)))) '(red green black))))
 
 (define (update-hints st hs)
@@ -211,7 +219,7 @@
 
 (define (automove st)
   (let ([flower? (and (null? (car (state-flo st))) (find-target st 'flower))]
-         [next-target? (find-target st (min-visible (state-fou st)))]
+         [next-target? (find-target st (next-target (state-fou st)))]
          [ds (dragons-collectable? st)])
     (cond
       [flower? (single-move (move-off st flower?))]
@@ -224,20 +232,20 @@
     (cond
       [(>= i (length res-tops)) #f]
       [(not (car rs)) i]
-      [(and (eq? (caar rs) color) (eq? (cdar rs) 'dragon)) i]
+      [(and (suitq? (car rs) color) (rankq? (car rs) 'dragon)) i]
       [else (loop (1+ i) (cdr rs))])))
 
 (define (put-dragons-res res pile color)
   (let loop ([i (1- (length res))] [res^ '()])
     (if (negative? i)
       res^
-      (let ([reselt (list-ref res i)])
+      (let ([elt (list-ref res i)])
         (cond
           [(= i pile)
-            (loop (1- i) (cons `((,color . collect)) res^))]
-          [(and (pair? reselt) (eq? (caar reselt) color))
+            (loop (1- i) (cons (make-card color 'collect) res^))]
+          [(and (pair? elt) (suitq? (car elt) color))
             (loop (1- i) (cons '() res^))]
-          [else (loop (1- i) (cons reselt res^))])))))
+          [else (loop (1- i) (cons elt res^))])))))
 
 (define (move-dragons st locs dstpile color)
   (automove
@@ -249,7 +257,7 @@
 (define (collect-dragons st color)
   (define (dragon-loc tops)
     (map (lambda (x y)
-           (if (and (pair? x) (eq? (car x) color) (eq? (cdr x) 'dragon))
+           (if (and (card? x) (suitq? x color) (rankq? x 'dragon))
              y #f))
       tops (enumerate tops)))
   (let* ([res-tops (map scar (state-res st))]
@@ -572,7 +580,7 @@
 
 (define (select/move st evptr)
   (let ([loc (char->location (get-char evptr))])
-    (if loc
+    (if (and loc (not (eq? (car loc) 'fou)))
       (let ([src (car loc)] [pile (cdr loc)])
         (if (null? (list-ref (state-sym st src) pile))
           (error-msg "Location is empty.")

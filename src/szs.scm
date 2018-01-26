@@ -456,10 +456,10 @@
 
 (define (display-clear-tab)
   (define clear-str (make-string tableau-char-width #\space))
-  (let ([end (+ first-tableau-line max-tableau-height)])
-    (let loop ([y first-tableau-line])
+  (let ([end (+ first-tableau-line max-tableau-height (y-offset))])
+    (let loop ([y (+ first-tableau-line (y-offset))])
       (when (< y end)
-        (display-string clear-str color-bg color-bg tableau-left y)
+        (display-string clear-str color-bg color-bg (+ tableau-left (x-offset)) y)
         (loop (1+ y))))))
 
 (define (display-tab tab)
@@ -485,7 +485,7 @@
   (tb-present))
 
 (define (highlight-cards st src pile depth)
-  (let* ([coord (list-ref (coords src) pile)]
+  (let* ([coord (list-ref (add-offsets (coords src)) pile)]
           [ps (list-ref (state-sym st src) pile)]
           [offset (1- (length ps))])
     (let ([x (car coord)] [y (+ offset (cadr coord))])
@@ -496,13 +496,15 @@
   (tb-present))
 
 (define (display-msg msg fg bg)
-  (let ([mlen (string-length msg)])
+  (let ([mlen (string-length msg)]
+         [x (1+ (x-offset))]
+         [y (+ msg-area-y (y-offset))])
     (when (> mlen (+ game-width -2))
       (error 'display-msg "message too long" msg))
-    (display-string msg fg bg 1 msg-area-y)
+    (display-string msg fg bg x y)
     (display-string
       (make-string (- game-width mlen 2) #\space)
-      color-bg color-bg (1+ mlen) msg-area-y)
+      color-bg color-bg (+ mlen 1 (x-offset)) y)
     (tb-present)))
 
 (define (clear-msg) (display-msg "" color-bg color-bg) #t)
@@ -605,22 +607,22 @@
 
 (define (win evptr)
   (display-clear-tab)
-  (display-string "You win!!" tb-white color-bg (+ 40 (x-offset)) (+ 9 (y-offset)))
+  (display-string "You win!!" tb-white color-bg
+    (+ 35 (x-offset)) (+ 12 (y-offset)))
   (inform-msg "Congratulations!!")
-  (tb-present)
-  (get-next-event evptr))
+  (tb-present))
 
 (define (main-event-loop evptr s0)
   (let loop ([us (list (automove s0))] [rs '()])
     (display-state (car us))
-    (when (won? (car us)) (win evptr) (loop (list (make-new-game)) '()))
+    (when (won? (car us)) (win evptr) (loop (list (automove (make-new-game))) '()))
     (let ([ev (get-next-event evptr)])
       (clear-msg)
       (case (lookup-keybind ev)
         [(undo) (let-values ([(us^ rs^) (undo us rs)]) (loop us^ rs^))]
         [(redo) (let-values ([(us^ rs^) (redo us rs)]) (loop us^ rs^))]
         [(new) (when (warn-ask "Start a new game? (Y/N)" evptr)
-                 (loop (list (make-new-game)) '()))]
+                 (loop (list (automove (make-new-game))) '()))]
         [(quit) (when (warn-ask "Quit game? (Y/N)" evptr)
                   (raise (make-message-condition "quit game")))]
         [(select) (let ([mv (select/move (car us) evptr)])

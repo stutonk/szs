@@ -1,4 +1,4 @@
-(library (termbox.chezscheme)
+(library (termbox)
   (export
     tb-default
     tb-black

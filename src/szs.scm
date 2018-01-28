@@ -1,4 +1,4 @@
-(import (scheme) (termbox.chezscheme))
+(import (scheme) (termbox))
 ;;;; model
 ;; list(a), number -> list(a)
 (define (list-rotate lst n)

@@ -1,26 +1,5 @@
-(import (scheme) (termbox))
+(import (scheme) (util) (termbox))
 ;;;; model
-;; list(a), number -> list(a)
-(define (list-rotate lst n)
-  (let loop ([c n] [l lst])
-    (if (zero? c) l (loop (1- c) (append (cdr l) (list (car l)))))))
-
-;; list(a), number -> list(a)
-(define (take lst n)
-  (let loop ([n n] [xs lst] [ys '()])
-    (if (zero? n)
-      (reverse ys)
-      (loop (1- n) (cdr xs) (cons (car xs) ys)))))
-
-;; a, list(a) -> number
-(define (ffq elt lst)
-  (let ([mem? (memq elt lst)])
-    (if mem?
-      (- (length lst) (length mem?))
-      mem?)))
-
-(define (scar p) (if (pair? p) (car p) #f))
-
 (define tableau-num-piles 8)
 (define tableau-pile-depth 5)
 

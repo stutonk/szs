@@ -1,9 +1,6 @@
 (library (util)
-  (export add1 ffq list-rotate scar sub1 take)
-  (import (rnrs))
-
-  ;; number -> number
-  (define (add1 n) (+ n 1))
+  (export ffq list-rotate scar take)
+  (import (chezscheme))
 
   ;; a, list(a) -> number
   (define (ffq elt lst)
@@ -19,9 +16,6 @@
 
   ;; {pair, atom} -> {atom, #f}
   (define (scar p) (if (pair? p) (car p) #f))
-
-  ;; number -> number
-  (define (sub1 n) (- n 1))
 
   ;; list(a), number -> list(a)
   (define (take lst n)
